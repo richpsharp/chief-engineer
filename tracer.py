@@ -36,6 +36,16 @@ class PowerConduit(Component):
         super().__init__(obj_id)
 
 
+class Reactor(Component):
+    """Used to generate power."""
+    def __init__(self, obj_id):
+        """Constructor."""
+        super().__init__(obj_id)
+
+    def get_power(self):
+        return 0
+
+
 def main():
     """Entry point."""
     conduit_list = []
@@ -44,6 +54,9 @@ def main():
         if conduit_list:
             conduit.connect(conduit_list[-1])
         conduit_list.append(conduit)
+
+    reactor = Reactor(-1)
+    conduit_list[0].connect(reactor)
 
     conduit_list[0].signal('test')
     conduit_list[-1].signal('test')
