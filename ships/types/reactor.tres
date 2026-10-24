@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="EquipmentType" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/definitions/component_type.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+kind = "reactor"
+ports = {"power_out": {"domain": "power", "direction": "out"}, "heat_out": {"domain": "thermal", "direction": "out"}}
+defaults = {"rated_power": 200, "heat_capacity": 80, "passive_loss": 0.08, "warning_temperature": 70, "heat_fraction": 0.08, "service_heat_fraction": 0.12}
+controls = Array[Dictionary]([{"id": "limit", "label": "Available output limit", "unit": "kW", "min": 0, "max": 200, "default": 200, "max_parameter": "rated_power"}])

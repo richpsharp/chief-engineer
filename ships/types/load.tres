@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="EquipmentType" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/definitions/component_type.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+kind = "load"
+ports = {"power_in": {"domain": "power", "direction": "in"}}
+defaults = {"rated_power": 1, "priority": 10}
+controls = Array[Dictionary]([])

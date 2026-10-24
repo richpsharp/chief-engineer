@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="EquipmentType" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/definitions/component_type.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+kind = "bus"
+ports = {"power_in": {"domain": "power", "direction": "in"}, "power_out": {"domain": "power", "direction": "out"}}
+defaults = {"rated_power": 200}
+controls = Array[Dictionary]([{"id": "limit", "label": "Local supply limit", "unit": "kW", "min": 0, "max": 200, "default": 200, "max_parameter": "rated_power"}, {"id": "closed", "label": "Breaker closed", "kind": "toggle", "default": true}])

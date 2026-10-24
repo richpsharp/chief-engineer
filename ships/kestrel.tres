@@ -1,0 +1,520 @@
+[gd_resource type="Resource" script_class="ShipDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/definitions/ship_definition.gd" id="ship"]
+[ext_resource type="Script" path="res://scripts/definitions/component_spec.gd" id="spec"]
+[ext_resource type="Script" path="res://scripts/definitions/assembly_definition.gd" id="assembly"]
+[ext_resource type="Script" path="res://scripts/definitions/connection_definition.gd" id="connection"]
+[ext_resource type="Resource" path="res://ships/types/reactor.tres" id="type_reactor"]
+[ext_resource type="Resource" path="res://ships/types/bus.tres" id="type_bus"]
+[ext_resource type="Resource" path="res://ships/types/pump.tres" id="type_pump"]
+[ext_resource type="Resource" path="res://ships/types/engine.tres" id="type_engine"]
+[ext_resource type="Resource" path="res://ships/types/load.tres" id="type_load"]
+[ext_resource type="Resource" path="res://ships/types/heat_exchanger.tres" id="type_heat_exchanger"]
+[ext_resource type="Resource" path="res://ships/types/radiator.tres" id="type_radiator"]
+[ext_resource type="Resource" path="res://ships/types/coolant.tres" id="type_coolant"]
+[ext_resource type="Resource" path="res://ships/types/battery.tres" id="type_battery"]
+
+[sub_resource type="Resource" id="reactor"]
+script = ExtResource("spec")
+id = "reactor"
+display_name = "Reactor core"
+short_name = "Reactor"
+description = "Follows connected ship demand up to its configured output limit."
+parent_id = "power_plant"
+definition = ExtResource("type_reactor")
+parameters = {}
+initial_settings = {"limit": 200}
+initial_state = {"temperature": 42}
+inspectable = true
+
+[sub_resource type="Resource" id="main_bus"]
+script = ExtResource("spec")
+id = "main_bus"
+display_name = "Main distribution bus"
+short_name = "Main bus"
+description = "Supplies essential services, core cooling, and the main engine."
+parent_id = "distribution"
+definition = ExtResource("type_bus")
+parameters = {"rated_power": 200}
+initial_settings = {"limit": 200, "closed": true}
+initial_state = {}
+inspectable = true
+
+[sub_resource type="Resource" id="aux_bus"]
+script = ExtResource("spec")
+id = "aux_bus"
+display_name = "Auxiliary bus B"
+short_name = "Auxiliary bus B"
+description = "Shares its capacity between service loads and the propulsion coolant pump."
+parent_id = "distribution"
+definition = ExtResource("type_bus")
+parameters = {"rated_power": 60}
+initial_settings = {"limit": 40, "closed": true}
+initial_state = {}
+inspectable = true
+
+[sub_resource type="Resource" id="battery"]
+script = ExtResource("spec")
+id = "battery"
+display_name = "Reserve battery"
+short_name = "Reserve battery"
+description = "Isolated reserve reference for future expansion. Supplies no power."
+parent_id = "distribution"
+definition = ExtResource("type_battery")
+parameters = {}
+initial_settings = {}
+initial_state = {}
+inspectable = true
+
+[sub_resource type="Resource" id="pump_a"]
+script = ExtResource("spec")
+id = "pump_a"
+display_name = "Circulation pump A"
+short_name = "Pump A"
+description = "Drives reactor heat exchange and shared radiator circulation."
+parent_id = "power_plant"
+definition = ExtResource("type_pump")
+parameters = {"kw_per_flow": 0.4166666666666667, "max_flow": 36, "priority": 20}
+initial_settings = {"flow": 24}
+initial_state = {"flow": 24}
+inspectable = true
+
+[sub_resource type="Resource" id="pump_b"]
+script = ExtResource("spec")
+id = "pump_b"
+display_name = "Circulation pump B"
+short_name = "Pump B"
+description = "Circulates coolant through the engine. Delivered flow depends on electrical supply."
+parent_id = "drive_unit"
+definition = ExtResource("type_pump")
+parameters = {"kw_per_flow": 0.4, "max_flow": 40, "priority": 40}
+initial_settings = {"flow": 30}
+initial_state = {"flow": 30}
+inspectable = true
+
+[sub_resource type="Resource" id="heat_exchanger"]
+script = ExtResource("spec")
+id = "heat_exchanger"
+display_name = "Core heat exchanger"
+short_name = "Heat exchanger"
+description = "Transfers core heat into the shared coolant using its circulation supply."
+parent_id = "power_plant"
+definition = ExtResource("type_heat_exchanger")
+parameters = {}
+initial_settings = {}
+initial_state = {}
+inspectable = true
+
+[sub_resource type="Resource" id="radiator"]
+script = ExtResource("spec")
+id = "radiator"
+display_name = "Radiator bank"
+short_name = "Radiator bank"
+description = "Rejects coolant heat when circulation and panel deployment are available."
+parent_id = "thermal_network"
+definition = ExtResource("type_radiator")
+parameters = {}
+initial_settings = {"deployment": 100}
+initial_state = {}
+inspectable = true
+
+[sub_resource type="Resource" id="main_engine"]
+script = ExtResource("spec")
+id = "main_engine"
+display_name = "Main engine"
+short_name = "Main engine"
+description = "Follows commanded thrust within electrical and cooling capacity."
+parent_id = "drive_unit"
+definition = ExtResource("type_engine")
+parameters = {}
+initial_settings = {"thrust": 30}
+initial_state = {"thrust": 30, "temperature": 55}
+inspectable = true
+
+[sub_resource type="Resource" id="coolant_reservoir"]
+script = ExtResource("spec")
+id = "coolant_reservoir"
+display_name = "Shared coolant"
+short_name = "Coolant"
+description = "Thermal inventory shared by the cooling circuits."
+parent_id = "thermal_network"
+definition = ExtResource("type_coolant")
+parameters = {}
+initial_settings = {}
+initial_state = {"temperature": 32}
+inspectable = false
+
+[sub_resource type="Resource" id="life_support"]
+script = ExtResource("spec")
+id = "life_support"
+display_name = "Life support"
+short_name = "Life support"
+description = "Essential life-support electrical load."
+parent_id = "distribution"
+definition = ExtResource("type_load")
+parameters = {"rated_power": 28, "priority": 10}
+initial_settings = {}
+initial_state = {}
+inspectable = false
+
+[sub_resource type="Resource" id="avionics"]
+script = ExtResource("spec")
+id = "avionics"
+display_name = "Avionics"
+short_name = "Avionics"
+description = "Flight-control electrical load."
+parent_id = "distribution"
+definition = ExtResource("type_load")
+parameters = {"rated_power": 5, "priority": 11}
+initial_settings = {}
+initial_state = {}
+inspectable = false
+
+[sub_resource type="Resource" id="hull_services"]
+script = ExtResource("spec")
+id = "hull_services"
+display_name = "Hull services"
+short_name = "Hull services"
+description = "Compartment service electronics."
+parent_id = "distribution"
+definition = ExtResource("type_load")
+parameters = {"rated_power": 3, "priority": 12}
+initial_settings = {}
+initial_state = {}
+inspectable = false
+
+[sub_resource type="Resource" id="shielding"]
+script = ExtResource("spec")
+id = "shielding"
+display_name = "Radiation protection"
+short_name = "Radiation"
+description = "Shield standby electronics."
+parent_id = "distribution"
+definition = ExtResource("type_load")
+parameters = {"rated_power": 4, "priority": 13}
+initial_settings = {}
+initial_state = {}
+inspectable = false
+
+[sub_resource type="Resource" id="sensors"]
+script = ExtResource("spec")
+id = "sensors"
+display_name = "Sensor electronics"
+short_name = "Sensors"
+description = "Sensor-suite electrical load."
+parent_id = "distribution"
+definition = ExtResource("type_load")
+parameters = {"rated_power": 8, "priority": 30}
+initial_settings = {}
+initial_state = {}
+inspectable = false
+
+[sub_resource type="Resource" id="habitat"]
+script = ExtResource("spec")
+id = "habitat"
+display_name = "Habitat services"
+short_name = "Habitat"
+description = "Auxiliary habitat electrical services."
+parent_id = "distribution"
+definition = ExtResource("type_load")
+parameters = {"rated_power": 10, "priority": 31}
+initial_settings = {}
+initial_state = {}
+inspectable = false
+
+[sub_resource type="Resource" id="assembly_engineering"]
+script = ExtResource("assembly")
+id = "engineering"
+display_name = "Engineering"
+parent_id = ""
+ports = {}
+
+[sub_resource type="Resource" id="assembly_power_plant"]
+script = ExtResource("assembly")
+id = "power_plant"
+display_name = "Power plant"
+parent_id = "engineering"
+ports = {"electrical": {"component": "reactor", "port": "power_out"}, "heat": {"component": "reactor", "port": "heat_out"}}
+
+[sub_resource type="Resource" id="assembly_distribution"]
+script = ExtResource("assembly")
+id = "distribution"
+display_name = "Electrical distribution"
+parent_id = "engineering"
+ports = {"main_in": {"component": "main_bus", "port": "power_in"}, "aux_in": {"component": "aux_bus", "port": "power_in"}}
+
+[sub_resource type="Resource" id="assembly_propulsion"]
+script = ExtResource("assembly")
+id = "propulsion"
+display_name = "Propulsion assembly"
+parent_id = "engineering"
+ports = {"power_in": {"component": "drive_unit", "port": "power_in"}, "pump_power": {"component": "drive_unit", "port": "pump_power"}, "flow_in": {"component": "drive_unit", "port": "flow_in"}, "heat_out": {"component": "drive_unit", "port": "heat_out"}}
+
+[sub_resource type="Resource" id="assembly_drive_unit"]
+script = ExtResource("assembly")
+id = "drive_unit"
+display_name = "Main drive module"
+parent_id = "propulsion"
+ports = {"power_in": {"component": "main_engine", "port": "power_in"}, "pump_power": {"component": "pump_b", "port": "power_in"}, "flow_in": {"component": "main_engine", "port": "flow_in"}, "heat_out": {"component": "main_engine", "port": "heat_out"}}
+
+[sub_resource type="Resource" id="assembly_thermal_network"]
+script = ExtResource("assembly")
+id = "thermal_network"
+display_name = "Heat rejection"
+parent_id = "engineering"
+ports = {}
+
+[sub_resource type="Resource" id="link_source_main"]
+script = ExtResource("connection")
+id = "source_main"
+from_component = "power_plant"
+from_port = "electrical"
+to_component = "distribution"
+to_port = "main_in"
+
+[sub_resource type="Resource" id="link_source_aux"]
+script = ExtResource("connection")
+id = "source_aux"
+from_component = "power_plant"
+from_port = "electrical"
+to_component = "distribution"
+to_port = "aux_in"
+
+[sub_resource type="Resource" id="link_feed_life_support"]
+script = ExtResource("connection")
+id = "feed_life_support"
+from_component = "main_bus"
+from_port = "power_out"
+to_component = "life_support"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_feed_avionics"]
+script = ExtResource("connection")
+id = "feed_avionics"
+from_component = "main_bus"
+from_port = "power_out"
+to_component = "avionics"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_feed_hull_services"]
+script = ExtResource("connection")
+id = "feed_hull_services"
+from_component = "main_bus"
+from_port = "power_out"
+to_component = "hull_services"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_feed_shielding"]
+script = ExtResource("connection")
+id = "feed_shielding"
+from_component = "main_bus"
+from_port = "power_out"
+to_component = "shielding"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_feed_pump_a"]
+script = ExtResource("connection")
+id = "feed_pump_a"
+from_component = "main_bus"
+from_port = "power_out"
+to_component = "pump_a"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_feed_sensors"]
+script = ExtResource("connection")
+id = "feed_sensors"
+from_component = "aux_bus"
+from_port = "power_out"
+to_component = "sensors"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_feed_habitat"]
+script = ExtResource("connection")
+id = "feed_habitat"
+from_component = "aux_bus"
+from_port = "power_out"
+to_component = "habitat"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_feed_propulsion_pump"]
+script = ExtResource("connection")
+id = "feed_propulsion_pump"
+from_component = "aux_bus"
+from_port = "power_out"
+to_component = "propulsion"
+to_port = "pump_power"
+
+[sub_resource type="Resource" id="link_feed_engine"]
+script = ExtResource("connection")
+id = "feed_engine"
+from_component = "main_bus"
+from_port = "power_out"
+to_component = "propulsion"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_core_circulation"]
+script = ExtResource("connection")
+id = "core_circulation"
+from_component = "pump_a"
+from_port = "flow_out"
+to_component = "heat_exchanger"
+to_port = "flow_in"
+
+[sub_resource type="Resource" id="link_radiator_circulation"]
+script = ExtResource("connection")
+id = "radiator_circulation"
+from_component = "pump_a"
+from_port = "flow_out"
+to_component = "radiator"
+to_port = "flow_in"
+
+[sub_resource type="Resource" id="link_engine_circulation"]
+script = ExtResource("connection")
+id = "engine_circulation"
+from_component = "pump_b"
+from_port = "flow_out"
+to_component = "propulsion"
+to_port = "flow_in"
+
+[sub_resource type="Resource" id="link_core_heat"]
+script = ExtResource("connection")
+id = "core_heat"
+from_component = "power_plant"
+from_port = "heat"
+to_component = "heat_exchanger"
+to_port = "heat_in"
+
+[sub_resource type="Resource" id="link_core_to_coolant"]
+script = ExtResource("connection")
+id = "core_to_coolant"
+from_component = "heat_exchanger"
+from_port = "heat_out"
+to_component = "coolant_reservoir"
+to_port = "heat_in"
+
+[sub_resource type="Resource" id="link_engine_to_coolant"]
+script = ExtResource("connection")
+id = "engine_to_coolant"
+from_component = "propulsion"
+from_port = "heat_out"
+to_component = "coolant_reservoir"
+to_port = "heat_in"
+
+[sub_resource type="Resource" id="link_coolant_to_radiator"]
+script = ExtResource("connection")
+id = "coolant_to_radiator"
+from_component = "coolant_reservoir"
+from_port = "heat_out"
+to_component = "radiator"
+to_port = "heat_in"
+
+[resource]
+script = ExtResource("ship")
+schema_version = 1
+id = "kestrel"
+display_name = "Kestrel"
+ambient_temperature = 10.0
+components = Array[Resource]([SubResource("reactor"), SubResource("main_bus"), SubResource("aux_bus"), SubResource("battery"), SubResource("pump_a"), SubResource("pump_b"), SubResource("heat_exchanger"), SubResource("radiator"), SubResource("main_engine"), SubResource("coolant_reservoir"), SubResource("life_support"), SubResource("avionics"), SubResource("hull_services"), SubResource("shielding"), SubResource("sensors"), SubResource("habitat")])
+assemblies = Array[Resource]([SubResource("assembly_engineering"), SubResource("assembly_power_plant"), SubResource("assembly_distribution"), SubResource("assembly_propulsion"), SubResource("assembly_drive_unit"), SubResource("assembly_thermal_network")])
+connections = Array[Resource]([SubResource("link_source_main"), SubResource("link_source_aux"), SubResource("link_feed_life_support"), SubResource("link_feed_avionics"), SubResource("link_feed_hull_services"), SubResource("link_feed_shielding"), SubResource("link_feed_pump_a"), SubResource("link_feed_sensors"), SubResource("link_feed_habitat"), SubResource("link_feed_propulsion_pump"), SubResource("link_feed_engine"), SubResource("link_core_circulation"), SubResource("link_radiator_circulation"), SubResource("link_engine_circulation"), SubResource("link_core_heat"), SubResource("link_core_to_coolant"), SubResource("link_engine_to_coolant"), SubResource("link_coolant_to_radiator")])
+views = Array[Dictionary]([
+  {
+    "id": "reactor",
+    "name": "Reactor",
+    "kind": "summary",
+    "summary_kind": "reactor",
+    "description": "Generation and source capacity",
+    "detail": "Source output follows connected electrical demand.",
+    "members": [
+      "reactor"
+    ]
+  },
+  {
+    "id": "power",
+    "name": "Power",
+    "kind": "workspace",
+    "summary_kind": "power",
+    "description": "Generation, distribution, and connected loads",
+    "detail": "Buses supply services, pumps, and propulsion.",
+    "members": [
+      "reactor",
+      "main_bus",
+      "aux_bus",
+      "battery"
+    ]
+  },
+  {
+    "id": "propulsion",
+    "name": "Propulsion",
+    "kind": "summary",
+    "summary_kind": "thrust",
+    "description": "Engine performance and dependencies",
+    "detail": "Thrust follows electrical and coolant capacity.",
+    "members": [
+      "main_engine"
+    ]
+  },
+  {
+    "id": "cooling",
+    "name": "Cooling",
+    "kind": "workspace",
+    "summary_kind": "temperature",
+    "description": "Coolant circulation, heat transfer, and heat rejection",
+    "detail": "Cooling circuits move heat to the shared radiator.",
+    "members": [
+      "pump_a",
+      "heat_exchanger",
+      "radiator",
+      "pump_b",
+      "main_engine",
+      "coolant_reservoir"
+    ]
+  },
+  {
+    "id": "life_support",
+    "name": "Life support",
+    "kind": "summary",
+    "summary_kind": "load",
+    "description": "Essential electrical services",
+    "detail": "Continuous critical load on the main bus.",
+    "members": [
+      "life_support"
+    ]
+  },
+  {
+    "id": "shielding",
+    "name": "Radiation protection",
+    "kind": "summary",
+    "summary_kind": "load",
+    "description": "Radiation protection services",
+    "detail": "Shield standby electronics on the main bus.",
+    "members": [
+      "shielding"
+    ],
+    "nav_name": "Radiation"
+  },
+  {
+    "id": "sensors",
+    "name": "Sensors",
+    "kind": "summary",
+    "summary_kind": "load",
+    "description": "Sensor-suite electrical services",
+    "detail": "Sensor electronics have priority on the auxiliary bus.",
+    "members": [
+      "sensors"
+    ]
+  },
+  {
+    "id": "hull",
+    "name": "Hull & compartments",
+    "kind": "summary",
+    "summary_kind": "load",
+    "description": "Compartment service electronics",
+    "detail": "Electrical services; structural damage is not modeled.",
+    "members": [
+      "hull_services"
+    ],
+    "nav_name": "Hull"
+  }
+])
+layouts = {"power": {"nodes": {"reactor": Rect2(266, 432, 186, 106), "main_bus": Rect2(514, 366, 198, 106), "aux_bus": Rect2(514, 574, 198, 106), "battery": Rect2(266, 678, 186, 92), "pump_a": Rect2(770, 366, 190, 106), "pump_b": Rect2(770, 574, 190, 106)}}, "cooling": {"nodes": {"pump_a": Rect2(266, 384, 186, 106), "heat_exchanger": Rect2(514, 384, 198, 106), "pump_b": Rect2(266, 610, 186, 106), "main_engine": Rect2(514, 610, 198, 106), "radiator": Rect2(770, 495, 190, 106)}}}
