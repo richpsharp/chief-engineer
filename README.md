@@ -1,0 +1,88 @@
+# Chief Engineer
+
+A Godot prototype for exploring an operating starship through its engineering systems. The ship starts healthy and runs continuously. Change a setting, follow its effects through connected equipment, and restore the ship to normal operation.
+
+The overview presents eight ship systems: Reactor, Power, Propulsion, Cooling, Life support, Radiation protection, Sensors, and Hull & compartments. **Power** and **Cooling** have detailed workspaces, equipment inspectors, and working controls. The other six currently provide summaries and basic load references; they do not yet have the same depth of simulation.
+
+## Play
+
+On this Windows checkout, double-click **play.cmd**. It uses the portable Godot engine in `.tools/godot/`, when available, or `godot.exe` / `godot4.exe` on your PATH.
+
+For a fresh checkout:
+
+1. Download the **standard edition of Godot 4.6** from [the official archive](https://godotengine.org/download/archive/4.6-stable/). No .NET SDK or Python is required.
+2. Open Godot's project manager, choose **Import**, and select `project.godot` in this folder.
+3. Open the project and press **F5** (Run Project).
+
+The project uses the Compatibility renderer. The portable engine is a local convenience and is not tracked by Git.
+
+## Explore the ship
+
+- Select **Power** or **Cooling** from the overview to open its equipment workspace.
+- Select a piece of equipment to see its readings, dependencies, and available controls.
+- Use the breadcrumbs or **Back** to move between the overview, workspaces, and equipment.
+- Follow equipment crosslinks to inspect a dependency in another system. A cooling problem may originate in its electrical supply.
+- **Pause** freezes the simulation and operating controls so you can examine the current state. Resume to continue.
+- **Reset** restores the healthy starting configuration.
+
+Press **P** to pause or resume, and **Escape** to go back.
+
+There is no countdown, win condition, or loss screen. Leaving the initial controls alone keeps the ship running normally. Equipment performance and recovery evolve over time as you experiment.
+
+## Controls currently modeled
+
+### Power
+
+The reactor automatically supplies the demand it can meet, up to its configured capacity limit. That limit is available capacity, not a command to generate a fixed amount of power.
+
+The main and auxiliary buses have breaker controls. The auxiliary bus also has a total power limit shared by its loads. Its healthy demand is **30 kW**: **18 kW** of base loads plus **12 kW** for cooling pump B. The normal auxiliary limit is **40 kW**.
+
+### Cooling
+
+Pump A normally runs at a flow setting of **24 L/s**, and pump B at **30 L/s**. Their delivered flow depends on available electrical power as well as the requested setting. Radiator deployment starts at **100%**.
+
+Pump A also circulates coolant through the shared radiator. Stopping it prevents active heat rejection even with the radiator fully deployed; temperatures then respond to the heat still being produced.
+
+The main-engine inspector in Cooling includes an engine command, initially **30%**. Actual engine performance is constrained by the cooling it receives. Power, flow, temperatures, and engine output provide different views of the same dependencies.
+
+## A first experiment
+
+1. Open **Power** and select the **auxiliary bus**. Observe its normal 30 kW demand against a 40 kW limit.
+2. Lower its limit to **24 kW**. The 18 kW base load leaves only **6 kW** for pump B, half of its normal 12 kW supply.
+3. Follow the cooling dependency or open **Cooling**, then inspect **pump B**. Its flow settles from **30** toward **15**.
+4. Inspect the **main engine**. With its command still at 30%, reduced cooling limits its delivered output toward **15%**.
+5. Restore the auxiliary bus limit to **40 kW** and watch the pump and engine recover gradually.
+
+This is a way to learn the ship through cause and effect: the reduced engine output originates at a power-distribution setting. You can also change pump settings, radiator deployment, reactor capacity, or breakers and observe the resulting readings.
+
+These are simplified gameplay relationships, not a real electrical or thermal engineering solver.
+
+## How the prototype is built
+
+- `scenes/main.tscn` is the starting scene.
+- `scripts/main.gd` builds the overview, department workspaces, inspectors, navigation, and controls. It sends commands to the simulation and displays the results.
+- `scripts/ship_simulation.gd` owns the machinery state and the power, cooling, and engine relationships independently of the interface.
+- `tests/test_simulation.gd` checks the simulation rules.
+- `tests/test_interface.gd` exercises scene navigation and control connections.
+
+Start in the simulation script to change how equipment responds. Start in the interface script to change how the ship is presented or inspected. Keep displayed descriptions and units consistent with any rule changes.
+
+The older `tracer.py` and `fact-mod-example/` remain as earlier experiments and are not used by this Godot prototype.
+
+## Run checks
+
+With Godot on your PATH:
+
+```powershell
+godot --headless --path . --script tests/test_simulation.gd
+godot --headless --path . --script tests/test_interface.gd
+godot --headless --path . --quit-after 3
+```
+
+Or use this checkout's portable runtime:
+
+```powershell
+& ./.tools/godot/Godot_v4.6-stable_win64_console.exe --headless --path . --script tests/test_simulation.gd
+```
+
+A successful test run exits with code 0. Checks cover stable operation, equipment dependencies, reduced supply and recovery, pause, reset, and interface interaction.
