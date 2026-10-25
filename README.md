@@ -33,7 +33,7 @@ There is no countdown, win condition, or loss screen. Leaving the initial contro
 
 | Ship | Engines at cruise | Buses / pumps | Cruise draw / capacity |
 | --- | --- | --- | --- |
-| Kestrel | One at 30% | 2 / 2 | 152 / 200 kW |
+| Kestrel | One at 30% | 4 / 2 | 152 / 200 kW |
 | Tern, a twin-engine utility ship | Two at 20% each | 5 / 3 | 144 / 220 kW |
 
 ## Controls currently modeled
@@ -42,7 +42,7 @@ There is no countdown, win condition, or loss screen. Leaving the initial contro
 
 The reactor automatically supplies the demand it can meet, up to its configured capacity limit. That limit is available capacity, not a command to generate a fixed amount of power.
 
-Kestrel's main and auxiliary buses have breaker controls. The auxiliary bus also has a total power limit shared by its loads. Its healthy demand is **30 kW**: **18 kW** of base loads plus **12 kW** for cooling pump B. The normal auxiliary limit is **40 kW**.
+Kestrel's main and auxiliary buses have breaker controls. Each pump also has a dedicated feeder breaker, so isolating pump A leaves the main bus and its other loads connected. The auxiliary bus has a total power limit shared by its loads. Its healthy demand is **30 kW**: **18 kW** of base loads plus **12 kW** for cooling pump B. The normal auxiliary limit is **40 kW**.
 
 Tern has a shared distribution trunk and separate port and starboard drive buses. Each drive includes a dedicated pump feeder: opening that feeder cuts its coolant pump's power while leaving the engine's electrical feed connected.
 
@@ -50,7 +50,7 @@ Tern has a shared distribution trunk and separate port and starboard drive buses
 
 Kestrel's pump A normally runs at a flow setting of **24 L/s**, and pump B at **30 L/s**. Their delivered flow depends on available electrical power as well as the requested setting. Radiator deployment starts at **100%**.
 
-Pump A also circulates coolant through the shared radiator. Stopping it prevents active heat rejection even with the radiator fully deployed; temperatures then respond to the heat still being produced.
+Pump A normally circulates coolant through the core exchanger and shared radiator. Stopping it prevents active heat rejection unless a bypass supplies that circuit. Temperatures respond to the heat still being produced.
 
 Kestrel's main-engine inspector in Cooling includes an engine command, initially **30%**. Actual engine performance is constrained by the cooling it receives. Power, flow, temperatures, and engine output provide different views of the same dependencies.
 
@@ -69,6 +69,26 @@ Temperature readings include their current rate of change in °C/min. Heat excha
 This is a way to learn the ship through cause and effect: the reduced engine output originates at a power-distribution setting. You can also change pump settings, radiator deployment, reactor capacity, or breakers and observe the resulting readings.
 
 These are simplified gameplay relationships, not a real electrical or thermal engineering solver.
+
+## Install a coolant bypass on Kestrel
+
+Kestrel carries one reusable **24 L/s bypass kit**, initially uninstalled. Open **Cooling → Coolant bypass kit** to choose a donor pump and destination circuit. This is a player-installed connection: the ship does not start with a working crossfeed.
+
+Try keeping the core cool while repairing pump A:
+
+1. Optionally open **Pump A → Service life** and choose **Try worn-pump condition** to create a repair need.
+2. In the bypass panel, choose **Circulation pump B** and **Core / radiator circuit**. Its shortcuts lead to each pump's electrical supply and controls; your endpoint choices remain selected when you return.
+3. Open the **Pump A feed** and **Pump B feed** breakers, then close both circuits' primary valves in the bypass panel. The main and auxiliary buses can stay on. Installation briefly interrupts both pumps, including engine cooling.
+4. Choose **Install kit**. After 10 simulated seconds, it is fitted with its bypass valve closed. Installation and pump repair share one work station.
+5. Open the **Engine circuit** primary valve and the bypass valve. Leave the core's primary valve closed, close **Pump B feed** to reconnect its power, and raise B's flow request to **40 L/s**.
+6. At full diversion, B supplies **24 L/s** to the core/radiator circuit and **16 L/s** to its engine circuit. The engine settles at **16%** instead of its requested 30%. The exchanger and radiator share one circulation flow; they do not each consume another 24 L/s.
+7. Return to A's service panel and patch or replace its wear parts. A stays electrically isolated with its primary valve closed while B supplies cooling. Life support remains powered.
+8. After replacement, close the bypass, reopen the core primary valve, reconnect **Pump A feed**, and return B's request to **30 L/s**. The normal 152 kW cruise point recovers. A temporary patch leaves A at 85% efficiency: its 24 L/s request delivers 20.4 L/s, so allow for that reduced cooling before ending backup operation.
+9. The fitted kit can stay closed for another emergency. To remove it, isolate both pumps and close both primary valves again, then choose **Remove & recover kit**. After 10 seconds, the kit returns to inventory. Restore the primary valves and feeders afterward.
+
+Requested diversion, actual delivery, and each circuit's remaining flow are shown together. A worn or underpowered donor delivers less, and diverting more flow leaves less for its own circuit. The kit enforces its rating; there is no overload override or trip model yet. Green schematic lines and equipment links follow the installed connection, including after switching away from and back to the ship.
+
+The kit represents paired supply/return connections and isolation fittings. This first version models circulation budgets and safe work states, without pipe pressure, drainage, or coolant inventory. Installation choices and work are retained for this app session; reset restores the uninstalled kit.
 
 ## Tern experiment
 
@@ -95,11 +115,11 @@ Try this on Tern:
 5. A patch takes 10 simulated seconds and provides limited capability for 100 operating hours. Replacing wear parts takes 30 simulated seconds, restores efficiency, and resets wear-part age. Supplies are spent when work starts; cancelling does not refund them.
 6. Close the feeder after work finishes and observe the pump and engine recover. The other drive remains available throughout the repair.
 
-Reconnecting a pump during maintenance holds the job and keeps the pump unavailable until isolation is restored. Pause freezes work; an unselected ship's work remains parked. Reset restores its authored history, machinery, and supplies. Current sessions are not saved when the app closes.
+Reconnecting a pump during maintenance holds the job and keeps the pump unavailable until isolation is restored. On Kestrel, maintenance also requires the pump's primary coolant valve closed and any bypass it supplies closed; an incoming bypass from the other pump can keep its circuit running. Pause freezes work; an unselected ship's work remains parked. Reset restores its authored history, machinery, and supplies. Current sessions are not saved when the app closes.
 
 Failures are repeatable for the same authored seed and operating history. Their probability accumulates with operating time and the age-dependent hazard; a failed pump needs replacement. A temporary patch improves output but does not rejuvenate its worn parts or remove their failure risk.
 
-The lifetime distinction is inspired by [bearing life ratings](https://www.jtekt.co.jp/products/bearing/en/support/bearing-knowledge/5-2000.html) and [NIST's explanation of the bathtub failure-rate curve](https://www.itl.nist.gov/div898/handbook/apr/section1/apr124.htm). The values and repair durations here are authored for play. The current redundancy is Tern's independent propulsion branches; live crossfeeds, pipe bypasses, and conserved coolant inventory are future extensions.
+The lifetime distinction is inspired by [bearing life ratings](https://www.jtekt.co.jp/products/bearing/en/support/bearing-knowledge/5-2000.html) and [NIST's explanation of the bathtub failure-rate curve](https://www.itl.nist.gov/div898/handbook/apr/section1/apr124.htm). The values and repair durations here are authored for play. Tern demonstrates independent propulsion branches; Kestrel demonstrates installing a shared-capacity coolant bypass. Electrical crossfeeds, pressure, and conserved coolant inventory remain future extensions.
 
 ## How the prototype is built
 
@@ -109,6 +129,7 @@ The lifetime distinction is inspired by [bearing life ratings](https://www.jtekt
 - `scripts/definitions/` contains the Resource schemas for reusable component types, component instances, assemblies, typed connections, and ships.
 - `scripts/ship_simulation.gd` creates independent runtime state from a ship definition and advances its machinery in fixed 0.1-second steps. It owns command validation and physical calculations.
 - `scripts/simulation/maintenance_model.gd` owns operating history, pump wear and failure risk, repair supplies, and maintenance jobs.
+- `scripts/simulation/coolant_bypass.gd` owns circuit isolation, the installed route, finite flow allocation, kit inventory, and installation/removal work. `scripts/presentation/coolant_bypass_panel.gd` presents its controls and prerequisites.
 - `scripts/presentation/ship_presenter.gd` turns numerical runtime readings into labels, status explanations, conditions, and dependency links.
 - `scripts/main.gd` builds the interface from the ship's view and equipment metadata. Controls send addressed commands; they do not directly change physical state.
 - `tests/test_simulation.gd` checks the simulation rules.
@@ -119,6 +140,7 @@ The lifetime distinction is inspired by [bearing life ratings](https://www.jtekt
 - `tests/test_thermal_connections.gd` checks thermal connection readings and schematic activity for exposed reservoirs, multiple inlets, and stopped or reversed heat transfer.
 - `tests/test_tern.gd` checks sustained healthy cruise and the two independent propulsion branches. `tests/test_ship_selection.gd` exercises selection, retained sessions, both ships' navigation, and the Tern experiment through the console.
 - `tests/test_maintenance.gd` checks lifetime accounting, wear, repair safety, and repeatable failures. `tests/test_maintenance_interface.gd` exercises the repair loop and service-life panels through the console.
+- `tests/test_coolant_bypass.gd` checks installation, isolation, shared flow, donor limits, job conflicts, restoration, inventory, and independent runtime state. `tests/test_bypass_interface.gd` performs the complete pump A/B repair loop through the player controls and checks live schematic links.
 
 ### Components, ports, and assemblies
 
@@ -136,7 +158,7 @@ Assemblies group equipment and expose named ports that resolve to internal compo
 
 Controls address a component ID and control ID, such as an auxiliary bus's `limit`. Accepted commands are queued and applied at the next simulation step. Invalid values and commands submitted while paused are rejected. Inspectors show committed readings rather than treating a requested setting as an instantaneous physical result.
 
-The electrical solver currently supports radial distribution with one power input per consumer. Load priority is authored data; equal priorities are ordered by stable component ID. It does not simulate electrical loops or crossfeeds. Coolant connections describe circulation capability, not pipe pressure or a conserved fluid inventory. Thermal behavior is a simplified heat-storage and transfer model. The battery remains an isolated reference component, and the summary departments are not detailed environmental simulations.
+The electrical solver currently supports radial distribution with one power input per consumer. Load priority is authored data; equal priorities are ordered by stable component ID. It does not simulate electrical loops or crossfeeds. Coolant connections describe circulation capability, not pipe pressure or a conserved fluid inventory. Ships can opt into authored coolant circuits and service couplings: runtime bypasses divide a donor's available circulation between circuits without modifying the ship Resource. Thermal behavior is a simplified heat-storage and transfer model. The battery remains an isolated reference component, and the summary departments are not detailed environmental simulations.
 
 **Kestrel and Tern are playable ship definitions.** Tern adds equipment and topology entirely as data: five nested buses, three pumps, two engines, and a shared thermal plant. It required no changes to equipment behaviors, network solvers, or the presenter. The shared console adds a catalog-driven selector and retains independent runtimes for the selected ships.
 
@@ -159,6 +181,8 @@ godot --headless --path . --script tests/test_tern.gd
 godot --headless --path . --script tests/test_ship_selection.gd
 godot --headless --path . --script tests/test_maintenance.gd
 godot --headless --path . --script tests/test_maintenance_interface.gd
+godot --headless --path . --script tests/test_coolant_bypass.gd
+godot --headless --path . --script tests/test_bypass_interface.gd
 godot --headless --path . --script tests/test_interface.gd
 godot --headless --path . --quit-after 3
 ```

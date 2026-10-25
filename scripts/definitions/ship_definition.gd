@@ -20,6 +20,10 @@ const ConnectionResource = preload("res://scripts/definitions/connection_definit
 @export var views: Array[Dictionary] = []
 @export var layouts: Dictionary = {}
 @export var maintenance_supplies: Dictionary = {"patches": 3, "spares": 2}
+## Explicit serial circuits opt into finite sharing by player-installed bypasses.
+@export var coolant_circuits: Array[Dictionary] = []
+@export var bypass_capacity: float = 24.0
+@export var bypass_kits: int = 0
 
 
 func component(component_id: String) -> Resource:
@@ -94,6 +98,10 @@ func validate() -> Array[String]:
 		errors.append("Unsupported ship schema version: %d." % schema_version)
 	if id.is_empty() or not is_finite(ambient_temperature):
 		errors.append("Ship identity and finite ambient temperature are required.")
+	if not is_finite(bypass_capacity) or bypass_capacity < 0.000001 or bypass_capacity > 1.0e12:
+		errors.append("Bypass capacity must be finite and between 0.000001 and 1e12 L/s.")
+	if bypass_kits < 0 or bypass_kits > 1000000:
+		errors.append("Bypass kit count must be between zero and 1000000.")
 	for key in ["patches", "spares"]:
 		if not maintenance_supplies.get(key) is int or int(maintenance_supplies.get(key, -1)) < 0:
 			errors.append("Maintenance supplies must be non-negative integer counts: " + key)
@@ -156,6 +164,8 @@ func validate() -> Array[String]:
 			continue
 		if link.id.is_empty() or link_ids.has(link.id):
 			errors.append("Duplicate or empty connection ID: " + link.id)
+		if link.id.begins_with("__bypass:"):
+			errors.append("Connection ID uses the reserved runtime bypass prefix: " + link.id)
 		link_ids[link.id] = true
 		var source: Dictionary = resolve_port(link.from_component, link.from_port)
 		var target: Dictionary = resolve_port(link.to_component, link.to_port)
@@ -203,7 +213,66 @@ func validate() -> Array[String]:
 			errors.append("Electrical cycles/crossfeeds are not supported.")
 			break
 	_validate_views(errors)
+	_validate_coolant_circuits(errors)
 	return errors
+
+
+func _validate_coolant_circuits(errors: Array[String]) -> void:
+	if bypass_kits > 0 and coolant_circuits.size() < 2:
+		errors.append("A bypass kit requires at least two coolant service circuits.")
+	var ids: Dictionary = {}
+	var pumps: Dictionary = {}
+	var members: Dictionary = {}
+	var edges: Array[Dictionary] = resolved_connections()
+	for circuit in coolant_circuits:
+		if not circuit.has_all(["id", "name", "pump", "members", "service_component", "reference_flow"]):
+			errors.append("Coolant circuit is missing required identity, equipment, or flow fields.")
+			continue
+		var strings_valid := true
+		for key in ["id", "name", "pump", "service_component"]:
+			if not circuit[key] is String or str(circuit[key]).strip_edges().is_empty():
+				strings_valid = false
+		if not strings_valid or not circuit.members is Array or circuit.members.is_empty():
+			errors.append("Coolant circuits require nonempty string identifiers and an array of members.")
+			continue
+		if ids.has(circuit.id):
+			errors.append("Duplicate coolant circuit ID: " + circuit.id)
+		ids[circuit.id] = true
+		if not _number(circuit.reference_flow) or float(circuit.reference_flow) < 0.000001 or float(circuit.reference_flow) > 1.0e12:
+			errors.append("Coolant circuit reference flow must be finite and between 0.000001 and 1e12: " + circuit.id)
+		var pump = component(circuit.pump)
+		if pump == null or pump.definition == null or pump.definition.kind != "pump" or not pump.inspectable:
+			errors.append("Coolant circuit needs an inspectable primary pump: " + circuit.id)
+		if pumps.has(circuit.pump):
+			errors.append("A primary pump can belong to only one explicit coolant circuit: " + circuit.pump)
+		pumps[circuit.pump] = true
+		var circuit_members: Dictionary = {}
+		for member in circuit.members:
+			if not member is String:
+				errors.append("Coolant circuit member IDs must be strings: " + circuit.id)
+				continue
+			var part = component(member)
+			if part == null or part.definition == null or part.definition.kind not in ["heat_exchanger", "engine", "radiator"]:
+				errors.append("Coolant circuit member must be a supported circulation consumer: " + member)
+			if members.has(member):
+				errors.append("A consumer can belong to only one explicit coolant circuit: " + member)
+			members[member] = true
+			circuit_members[member] = true
+			var found := false
+			for edge in edges:
+				if edge.domain == "coolant" and edge.to_component == member:
+					found = true
+					if edge.from_component != circuit.pump:
+						errors.append("Explicit circuit members must have only their primary pump as a native supply: " + member)
+			if not found:
+				errors.append("Coolant circuit member lacks its authored native connection: " + member)
+		var service = component(circuit.service_component)
+		if not circuit_members.has(circuit.service_component) or service == null or not service.inspectable:
+			errors.append("Coolant service coupling must belong to an inspectable circuit member: " + circuit.id)
+		# A donor's undeclared output would otherwise bypass finite allocation.
+		for edge in edges:
+			if edge.domain == "coolant" and edge.from_component == circuit.pump and not circuit_members.has(edge.to_component):
+				errors.append("Every coolant output of an explicit circuit pump must belong to that circuit: " + circuit.pump)
 
 
 func _validate_component(item: Resource, errors: Array[String]) -> void:

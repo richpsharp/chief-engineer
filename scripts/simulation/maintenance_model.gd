@@ -13,10 +13,12 @@ var _incoming: Dictionary = {}
 var supplies: Dictionary
 var job: Dictionary = {}
 var output_changed: bool = false
+var _bypass
 
 
-func _init(components: Dictionary, connections: Array, initial_supplies: Dictionary) -> void:
+func _init(components: Dictionary, connections: Array, initial_supplies: Dictionary, bypass = null) -> void:
 	_components = components
+	_bypass = bypass
 	supplies = initial_supplies.duplicate(true)
 	for edge in connections:
 		if edge.domain == "power":
@@ -108,6 +110,10 @@ func advance(delta: float) -> Array[String]:
 
 
 func isolated(id: String) -> bool:
+	return electrical_isolated(id) and (_bypass == null or _bypass.maintenance_isolated(id))
+
+
+func electrical_isolated(id: String) -> bool:
 	# Zero demand or an exhausted generator is not safe electrical isolation.
 	var cursor: String = id
 	var visited: Dictionary = {}
@@ -132,10 +138,14 @@ func reason_for(id: String, action: String) -> String:
 		return "" if job.get("component_id", "") == id else "No maintenance job on this component."
 	if not job.is_empty():
 		return "The maintenance station is occupied; finish or cancel its current job."
+	if _bypass != null and not _bypass.job.is_empty():
+		return "The maintenance station is occupied by bypass work."
 	if action == "simulate_wear":
 		return "Reset or repair this pump before introducing another worn-pump condition." if part.state.failed > 0.0 or part.state.service_age_hours >= float(part.config.rated_life_hours) * 1.05 else ""
-	if not isolated(id):
+	if not electrical_isolated(id):
 		return "Open an upstream supply breaker before working on this pump."
+	if _bypass != null and not _bypass.maintenance_isolated(id):
+		return _bypass.maintenance_reason(id)
 	if action == "patch":
 		if part.state.failed > 0.0:
 			return "A failed wear part needs replacement; a patch cannot restart it."
@@ -199,7 +209,7 @@ func info(id: String, paused: bool = false) -> Dictionary:
 		var reason: String = "Simulation is paused." if paused else reason_for(id, action)
 		result.actions[action] = {"enabled": reason.is_empty(), "reason": reason}
 	if active:
-		result.reason = "Maintenance paused; reopen an upstream supply breaker." if not result.isolated else "Isolated maintenance in progress; supply stays open after completion."
+		result.reason = "Maintenance held; restore electrical and coolant isolation." if not result.isolated else "Isolated maintenance in progress; supply stays open after completion."
 	elif valid:
 		if result.failed:
 			result.reason = "Wear-part failure. Isolate the pump and replace its wear parts."

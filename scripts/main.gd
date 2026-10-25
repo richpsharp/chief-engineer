@@ -5,6 +5,7 @@ const Simulation = preload("res://scripts/ship_simulation.gd")
 const Presenter = preload("res://scripts/presentation/ship_presenter.gd")
 const ShipCatalog = preload("res://scripts/ship_catalog.gd")
 const MaintenancePanel = preload("res://scripts/presentation/maintenance_panel.gd")
+const CoolantBypassPanel = preload("res://scripts/presentation/coolant_bypass_panel.gd")
 const INK = Color("08121c")
 const PANEL = Color("101f2c")
 const BORDER = Color("294050")
@@ -26,6 +27,8 @@ var overview_buttons: Dictionary = {}
 var equipment_buttons: Dictionary = {}
 var equipment_list_buttons: Dictionary = {}
 var dependency_buttons: Array[Button] = []
+var _dependency_container: VBoxContainer
+var _dependency_links: Array[Dictionary] = []
 var overview_labels: Dictionary = {}
 var equipment_labels: Dictionary = {}
 var workspace_layer: Control
@@ -41,6 +44,9 @@ var inspector_title: Label
 var inspector_condition: Label
 var maintenance_button: Button
 var maintenance_panel: Control
+var bypass_button: Button
+var bypass_panel: Control
+var _bypass_choices: Dictionary = {}
 var reading_rows: Array = []
 var supply_label: Label
 var cooling_label: Label
@@ -102,6 +108,7 @@ func select_ship(ship_id: String) -> bool:
 
 func _build_console() -> void:
 	close_maintenance()
+	close_bypass()
 	_clear(self)
 	nav_buttons.clear()
 	get_window().title = "Chief Engineer / " + ship.definition.display_name
@@ -319,6 +326,7 @@ func _clear(parent: Node) -> void:
 
 func _build_view() -> void:
 	close_maintenance()
+	close_bypass()
 	_clear(workspace_layer)
 	_clear(breadcrumb_layer)
 	overview_buttons.clear()
@@ -327,6 +335,8 @@ func _build_view() -> void:
 	equipment_list_buttons.clear()
 	equipment_labels.clear()
 	dependency_buttons.clear()
+	_dependency_container = null
+	_dependency_links.clear()
 	reading_rows.clear()
 	control_widgets.clear()
 	control_slider = null
@@ -335,6 +345,7 @@ func _build_view() -> void:
 	inspector_title = null
 	inspector_condition = null
 	maintenance_button = null
+	bypass_button = null
 	summary_value = null
 	conditions_label = null
 	condition_button = null
@@ -381,6 +392,12 @@ func _build_overview() -> void:
 	condition_button.add_theme_font_size_override("font_size", 15)
 
 func _build_workspace() -> void:
+	var has_coolant_members: bool = ship.definition.view(current_system).get("members", []).any(func(id):
+		return ship.components.has(id) and ship.components[id].kind in ["pump", "heat_exchanger", "radiator"])
+	if has_coolant_members and ship.bypass_info().supported:
+		view_title.size.x = 440
+		bypass_button = _button("Coolant bypass kit ›", Rect2(718, 272, 250, 34), open_bypass, workspace_layer)
+		bypass_button.add_theme_font_size_override("font_size", 15)
 	var layout: Dictionary = _workspace_nodes()
 	for id in layout:
 		var spec = ship.definition.component(id)
@@ -518,15 +535,28 @@ func _build_inspector() -> void:
 				control_value = value_label
 	column.add_child(HSeparator.new())
 	column.add_child(_text("CONNECTED EQUIPMENT", 12, MUTED))
+	_dependency_container = VBoxContainer.new()
+	column.add_child(_dependency_container)
+	_refresh_dependency_links(true)
+
+
+func _refresh_dependency_links(force: bool = false) -> void:
+	if not is_instance_valid(_dependency_container) or selected_equipment.is_empty():
+		return
 	var connected: Array[Dictionary] = presenter.links(selected_equipment)
+	if not force and connected == _dependency_links:
+		return
+	_dependency_links = connected.duplicate(true)
+	_clear(_dependency_container)
+	dependency_buttons.clear()
 	if connected.is_empty():
-		column.add_child(_text("No active connections", 14, MUTED))
+		_dependency_container.add_child(_text("No active connections", 14, MUTED))
 	for link in connected:
 		var button := _new_button(link.label + "  ›", navigate.bind(link.system, link.equipment))
 		button.add_theme_font_size_override("font_size", 14)
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.custom_minimum_size.y = 32
-		column.add_child(button)
+		_dependency_container.add_child(button)
 		dependency_buttons.append(button)
 
 func _build_summary() -> void:
@@ -609,10 +639,13 @@ func _refresh() -> void:
 		_refresh_log()
 	if is_instance_valid(maintenance_panel):
 		maintenance_panel.refresh()
+	if is_instance_valid(bypass_panel):
+		bypass_panel.refresh()
 
 func _refresh_inspector() -> void:
 	if selected_equipment == "":
 		return
+	_refresh_dependency_links()
 	var reason: String = presenter.equipment_reason(selected_equipment)
 	var status: String = presenter.equipment_status(selected_equipment)
 	var warning: bool = status not in ["Online", "Idle", "Standby reference"]
@@ -664,6 +697,7 @@ func _pause() -> void:
 
 func _reset_ship() -> void:
 	close_maintenance()
+	close_bypass()
 	ship.reset()
 	_refresh()
 	queue_redraw()
@@ -685,7 +719,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if event.keycode == KEY_P:
 			_pause()
 		elif event.keycode == KEY_ESCAPE:
-			if is_instance_valid(maintenance_panel):
+			if is_instance_valid(bypass_panel):
+				close_bypass()
+			elif is_instance_valid(maintenance_panel):
 				close_maintenance()
 			else:
 				_back()
@@ -695,6 +731,7 @@ func open_maintenance(id: String) -> void:
 	if not ship.components.has(id) or not ship.definition.component(id).inspectable:
 		return
 	close_maintenance()
+	close_bypass()
 	maintenance_panel = MaintenancePanel.new()
 	add_child(maintenance_panel)
 	maintenance_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -714,6 +751,34 @@ func close_maintenance() -> void:
 
 func _inspect_maintenance_supply(system: String, equipment: String) -> void:
 	close_maintenance()
+	navigate(system, equipment)
+
+
+func open_bypass() -> void:
+	if not ship.bypass_info().supported:
+		return
+	close_maintenance()
+	close_bypass()
+	bypass_panel = CoolantBypassPanel.new()
+	add_child(bypass_panel)
+	bypass_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bypass_panel.close_requested.connect(close_bypass)
+	bypass_panel.inspect_requested.connect(_inspect_bypass_equipment)
+	bypass_panel.configure(ship, presenter, _bypass_choices.get(ship.definition.id, {}))
+
+
+func close_bypass() -> void:
+	if is_instance_valid(bypass_panel):
+		_bypass_choices[bypass_panel.ship.definition.id] = bypass_panel.selected_endpoints()
+		remove_child(bypass_panel)
+		bypass_panel.queue_free()
+	bypass_panel = null
+	if is_instance_valid(bypass_button) and bypass_button.is_inside_tree():
+		bypass_button.grab_focus()
+
+
+func _inspect_bypass_equipment(system: String, equipment: String) -> void:
+	close_bypass()
 	navigate(system, equipment)
 
 
@@ -742,7 +807,7 @@ func _draw() -> void:
 	var layout: Dictionary = _workspace_nodes()
 	for edge in presenter.schematic_edges(layout.keys()):
 		var points: PackedVector2Array = _route_edge(layout[edge.from_component], layout[edge.to_component], layout)
-		_line(points, AMBER if edge.domain == "thermal" else CYAN, edge.active)
+		_line(points, GREEN if edge.get("bypass", false) else (AMBER if edge.domain == "thermal" else CYAN), edge.active)
 
 
 func _route_edge(source: Rect2, destination: Rect2, layout: Dictionary) -> PackedVector2Array:
