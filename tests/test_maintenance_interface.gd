@@ -1,6 +1,5 @@
 extends SceneTree
-## Exercise the maintenance loop through the same controls the player uses.
-
+## Repair from the same equipment inspector while the live network stays visible.
 const MainScene = preload("res://scenes/main.tscn")
 var console
 var checks: int = 0
@@ -20,92 +19,73 @@ func _run() -> void:
 	console.select_ship("tern")
 	console.navigate("cooling", "port_pump")
 	await process_frame
-	_check(is_instance_valid(console.maintenance_button), "The pump inspector exposes service life and maintenance.")
-	await _click_at_center(console.maintenance_button)
-	await process_frame
-	_check(is_instance_valid(console.maintenance_panel) and console.maintenance_panel.visible,
-		"The inspector opens the maintenance panel.")
 	var panel = console.maintenance_panel
-	_check(is_instance_valid(panel.failure_chart) and is_instance_valid(panel.performance_chart),
-		"Risk and performance have separate charts.")
-	var contained_focus := true
-	for index in range(15):
-		await _key(KEY_TAB)
-		var focused = root.gui_get_focus_owner()
-		contained_focus = contained_focus and focused != null and panel.is_ancestor_of(focused)
-	_check(contained_focus, "Tab navigation stays inside the visible maintenance panel.")
-	await _key(KEY_P)
-	_check(console.ship.paused and panel.action_buttons.simulate_wear.disabled,
-		"The panel's P shortcut pauses the simulation and disables work controls.")
-	await _key(KEY_P)
+	_check(is_instance_valid(panel) and console.workspace_layer.is_ancestor_of(panel),
+		"Supported pump maintenance is already part of the current workspace inspector.")
+	_check(not panel.details_visible() and not panel.failure_chart.is_visible_in_tree(),
+		"Routine repair actions do not require opening reliability charts.")
+	_check(panel.action_buttons.patch.visible and panel.action_buttons.replace.visible
+		and console.equipment_buttons.port_engine.is_visible_in_tree(),
+		"Repair actions and the affected engine remain visible in the same workspace.")
 	_check(panel.action_buttons.patch.disabled and panel.action_buttons.replace.disabled,
 		"An energized healthy pump does not offer unsafe maintenance.")
-	_check(not panel.action_buttons.simulate_wear.disabled, "The sandbox can introduce wear without waiting years.")
-	await _capture("maintenance-healthy.png")
+	await _click_at_center(panel.details_button)
+	_check(panel.details_visible() and panel.failure_chart.is_visible_in_tree()
+		and panel.performance_chart.is_visible_in_tree(), "One inline disclosure reveals separate reliability and performance charts.")
+	await _key(KEY_P)
+	_check(console.ship.paused and panel.action_buttons.simulate_wear.disabled,
+		"The console's P shortcut pauses work without an overlay capturing input.")
+	await _key(KEY_P)
 	var healthy: Dictionary = console.ship.snapshot()
 	await _click_at_center(panel.action_buttons.simulate_wear)
 	_check(console.ship.snapshot().components == healthy.components, "The sandbox action waits for a fixed step.")
 	_tick(0.1)
 	var info: Dictionary = console.ship.maintenance_info("port_pump")
 	_check(info.efficiency < 0.9 and info.running_hours >= 1000.0,
-		"The panel action creates an aged pump with reduced efficiency.")
+		"The inline sandbox action creates an aged pump with reduced efficiency.")
 	_check(console.presenter.equipment_status("port_pump") == "Degraded",
 		"Wear is diagnosed as degradation rather than an electrical shortage.")
 	_check(console.ship.components.port_engine.state.thrust < 20.0
 		and _near(console.ship.components.starboard_engine.state.thrust, 20.0),
-		"The worn pump affects its own engine while the other branch continues.")
-	var routed := false
-	for condition in console.presenter.conditions():
-		if condition.component_id == "port_engine":
-			routed = condition.equipment == "port_pump"
-	_check(routed, "The affected engine points the player to its degraded pump.")
-	await _capture("maintenance-worn.png")
-	_press(panel.supply_button)
-	await process_frame
-	_check(console.selected_equipment == "port_pump_feed" and console.current_system == "power",
-		"The supply shortcut reaches the pump's actual feeder.")
-	_check(not is_instance_valid(console.maintenance_panel) or not console.maintenance_panel.visible,
-		"Navigating to the supply closes the maintenance overlay.")
-	_press(console.breaker_button)
+		"The live diagram's port engine loses capability while the other drive stays available.")
+	console.close_maintenance()
+	_check(console.maintenance_panel == panel and not panel.details_visible()
+		and panel.action_buttons.replace.visible, "Collapsing charts leaves routine service and operating controls in place.")
+	await _capture("maintenance-inline-worn.png")
+	_press(console.inspector_controls.buttons.feeder)
 	_tick(0.1)
-	console.navigate("cooling", "port_pump")
-	_press(console.maintenance_button)
-	await process_frame
-	panel = console.maintenance_panel
+	_check(console.current_system == "cooling" and console.selected_equipment == "port_pump"
+		and not console.ship.components.port_pump_feed.settings.closed,
+		"The pump's local feeder can be isolated without leaving its Cooling inspector.")
 	_check(not panel.action_buttons.patch.disabled and not panel.action_buttons.replace.disabled,
-		"Isolation enables the repair choices.")
+		"Actual local electrical isolation enables Tern's repair choices.")
 	_press(panel.action_buttons.patch)
 	_tick(0.1)
-	_check(console.ship.maintenance_info("port_pump").job == "patch", "Patch starts a maintenance job.")
+	_check(console.ship.maintenance_info("port_pump").job == "patch", "Patch starts inline maintenance work.")
 	_tick(11.0)
 	_check(console.ship.maintenance_info("port_pump").patch_remaining_hours > 0.0,
 		"A completed patch retains a visible, finite operating life.")
-	await _capture("maintenance-patched.png")
 	var lifetime: float = console.ship.maintenance_info("port_pump").running_hours
 	_press(panel.action_buttons.replace)
-	_tick(0.1)
-	_check(console.ship.maintenance_info("port_pump").job == "replace", "Replacement can supersede a field patch.")
 	_tick(5.0)
-	await _capture("maintenance-repair.png")
-	console.close_maintenance()
+	_check(console.ship.maintenance_info("port_pump").job == "replace" and panel.progress.visible,
+		"Replacement progress stays in the pump inspector.")
+	_check(console.equipment_buttons.starboard_engine.is_visible_in_tree()
+		and _near(console.ship.components.starboard_engine.state.thrust, 20.0),
+		"The functioning drive remains visible and running during repair.")
+	await _capture("maintenance-inline-repair.png")
 	_press(console.pause_button)
-	console.open_maintenance("port_pump")
-	await process_frame
-	panel = console.maintenance_panel
 	var paused: Dictionary = console.ship.snapshot()
 	_tick(5.0)
 	_check(console.ship.snapshot() == paused and panel.action_buttons.cancel.disabled,
-		"Pause freezes the repair and its operating controls.")
-	console.close_maintenance()
+		"Pause freezes the repair and disables job cancellation.")
 	_press(console.pause_button)
-	console.open_maintenance("port_pump")
-	await process_frame
 	var tern = console.ship
 	var parked: Dictionary = tern.snapshot()
 	console.select_ship("kestrel")
 	await process_frame
-	_check(not is_instance_valid(console.maintenance_panel) or not console.maintenance_panel.visible,
-		"Switching ships cannot leave a repair panel attached to the previous runtime.")
+	_check(not is_instance_valid(console.maintenance_panel),
+		"Ship switching cannot retain a service inspector on the previous runtime.")
 	_tick(30.0)
 	_check(tern.snapshot() == parked, "A parked ship's repair and supplies remain unchanged.")
 	console.select_ship("tern")
@@ -113,32 +93,35 @@ func _run() -> void:
 	info = tern.maintenance_info("port_pump")
 	_check(info.job.is_empty() and _near(info.efficiency, 1.0) and _near(info.running_hours, lifetime),
 		"Replacement restores capability while preserving lifetime hours.")
-	console.navigate("power", "port_pump_feed")
-	_press(console.breaker_button)
+	console.navigate("cooling", "port_pump")
+	_press(console.inspector_controls.buttons.feeder)
 	_tick(60.0)
 	_check(_near(tern.components.port_engine.state.thrust, 20.0)
 		and _near(tern.components.starboard_engine.state.thrust, 20.0)
-		and console.presenter.conditions().is_empty(), "Recommissioning restores both drives to healthy cruise.")
-	console.navigate("cooling", "port_pump")
+		and console.presenter.conditions().is_empty(), "Recommissioning in Cooling restores both drives to healthy cruise.")
 	console.open_maintenance("port_pump")
 	await process_frame
-	await _capture("maintenance-restored.png")
-	console.close_maintenance()
+	panel = console.maintenance_panel
+	_check(panel.details_visible(), "The service-life shortcut expands details in the existing inspector.")
+	await _ensure_visible(panel.performance_chart)
+	_check(panel.info_labels.values().all(func(label): return label.size.y < 30.0),
+		"Narrow service-history value columns keep each numeric reading on one line.")
+	await _capture("maintenance-inline-charts.png")
+	await _ensure_visible(panel.failure_chart)
+	await _capture("maintenance-inline-risk.png")
+	await _key(KEY_ESCAPE)
+	_check(not panel.details_visible() and console.selected_equipment == "port_pump",
+		"Escape collapses details while retaining equipment selection and routine repair controls.")
 	_press(console.reset_button)
 	info = tern.maintenance_info("port_pump")
 	_check(_near(info.running_hours, 1000.0) and info.patches == 3 and info.spares == 2,
-		"Reset restores authored history and onboard repair supplies.")
+		"Reset restores authored history and repair supplies.")
 	console.navigate("power", "distribution_bus")
 	console.open_maintenance("distribution_bus")
 	await process_frame
-	_check(not tern.maintenance_info("distribution_bus").supported
-		and tern.maintenance_info("distribution_bus").rated_life_hours == 0.0,
-		"Equipment without a lifetime profile does not acquire a fictional expiry rating.")
-	await _capture("maintenance-unrated.png")
-	await _key(KEY_ESCAPE)
-	_check(not is_instance_valid(console.maintenance_panel) or not console.maintenance_panel.visible,
-		"Escape closes the service panel without changing the selected equipment.")
-	_check(console.selected_equipment == "distribution_bus", "Closing a panel preserves the underlying inspection route.")
+	_check(not is_instance_valid(console.maintenance_panel) and not is_instance_valid(console.maintenance_button),
+		"Equipment without a wear model does not advertise an unsupported repair menu.")
+	_check(console.selected_equipment == "distribution_bus", "Unsupported service requests do not change selection.")
 	print("%s: %d maintenance interface checks (%d failures)." % ["PASS" if failures == 0 else "FAIL", checks, failures])
 	quit(0 if failures == 0 else 1)
 
@@ -150,8 +133,6 @@ func _tick(seconds: float) -> void:
 		console.ship.tick(step)
 		remaining -= step
 	console._refresh()
-	if is_instance_valid(console.maintenance_panel) and console.maintenance_panel.has_method("refresh"):
-		console.maintenance_panel.refresh()
 	console.queue_redraw()
 
 
@@ -162,8 +143,19 @@ func _press(button: Button) -> void:
 	button.pressed.emit()
 
 
-func _click_at_center(button: Button) -> void:
+func _ensure_visible(control: Control) -> void:
 	await process_frame
+	var parent: Node = control.get_parent()
+	while parent != null:
+		if parent is ScrollContainer:
+			parent.ensure_control_visible(control)
+		parent = parent.get_parent()
+	await process_frame
+	await process_frame
+
+
+func _click_at_center(button: Button) -> void:
+	await _ensure_visible(button)
 	var position: Vector2 = root.get_final_transform() * (button.get_global_transform_with_canvas() * (button.size * 0.5))
 	var motion := InputEventMouseMotion.new()
 	motion.position = position

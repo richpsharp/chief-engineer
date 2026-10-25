@@ -40,9 +40,10 @@ func _run() -> void:
 	var all_pages_opened := true
 	for view in console.ship.definition.views:
 		var id: String = view.id
-		_press(console.nav_buttons[id])
+		console.navigate("overview")
+		_press(console.overview_buttons[id])
 		all_pages_opened = all_pages_opened and console.current_system == id
-	_check(all_pages_opened, "All eight departments have reachable pages.")
+	_check(all_pages_opened, "All eight systems remain reachable from the ship overview.")
 	var all_inspectors_valid := true
 	for spec in console.ship.definition.components:
 		if not spec.inspectable:
@@ -62,8 +63,8 @@ func _run() -> void:
 	await _capture("power.png")
 	_follow_link("pump_b_feed")
 	_follow_link("pump_b")
-	_check(console.current_system == "cooling" and console.selected_equipment == "pump_b",
-		"The auxiliary bus and local feeder links reach cooling pump B.")
+	_check(console.current_system == "power" and console.selected_equipment == "pump_b",
+		"The auxiliary bus and local feeder links select pump B without leaving Power.")
 	await _capture("cooling.png")
 	_press(console.back_button)
 	_check(console.selected_equipment == "pump_b_feed", "Back first returns to the pump's local feeder.")
@@ -286,6 +287,8 @@ func _test_hidden_equipment_with_schematic_position() -> void:
 	_check(edges.all(func(edge): return console.equipment_buttons.has(edge.from_component) and console.equipment_buttons.has(edge.to_component)),
 		"Every drawn connection terminates at displayed equipment, with no dangling hidden-pump endpoint.")
 	_check(not layout.has("pump_b"), "The drawing layout excludes the hidden pump as both an endpoint and a routing obstacle.")
+	pump_rect = layout["pump_a"]
+	exchanger_rect = layout["heat_exchanger"]
 	var visible_route: PackedVector2Array = console._route_edge(pump_rect, exchanger_rect, layout)
 	var straight_route := true
 	for point in visible_route:
@@ -358,7 +361,7 @@ func _check_condition_route(component: String, control: String, value: float) ->
 		return
 	console.navigate(route.system, route.equipment)
 	var target = console.ship.definition.component(route.equipment)
-	_check(target != null and console.current_system == console.ship.definition.workspace_for(route.equipment)
+	_check(target != null and console.current_system == route.system
 		and console.selected_equipment == route.equipment and console.inspector_title != null
 		and console.inspector_title.text == target.display_name,
 		"The %s condition opens a valid actionable equipment inspector." % component)
