@@ -3,6 +3,7 @@ extends Control
 
 const Simulation = preload("res://scripts/ship_simulation.gd")
 const Presenter = preload("res://scripts/presentation/ship_presenter.gd")
+const ShipCatalog = preload("res://scripts/ship_catalog.gd")
 const INK = Color("08121c")
 const PANEL = Color("101f2c")
 const BORDER = Color("294050")
@@ -14,6 +15,8 @@ const AMBER = Color("f4c574")
 const DIM = Color("466171")
 var ship = Simulation.new()
 var presenter = Presenter.new(ship)
+var _ship_sessions: Dictionary = {}
+var ship_selector: OptionButton
 var current_system: String = "overview"
 var selected_equipment: String = ""
 var history: Array[Dictionary] = []
@@ -63,9 +66,55 @@ func _ready() -> void:
 		set_process(false)
 		set_process_unhandled_key_input(false)
 		return
+	_ship_sessions[ship.definition.id] = ship
+	_build_console()
+
+
+func select_ship(ship_id: String) -> bool:
+	var definition: Resource = null
+	for candidate in ShipCatalog.DEFINITIONS:
+		if candidate.id == ship_id:
+			definition = candidate
+			break
+	if definition == null:
+		return false
+	if ship.definition.id == ship_id:
+		return true
+	var next_ship = _ship_sessions.get(ship_id)
+	if next_ship == null:
+		next_ship = Simulation.new(definition)
+	if not next_ship.validation_errors.is_empty():
+		return false
+	_ship_sessions[ship.definition.id] = ship
+	_ship_sessions[ship_id] = next_ship
+	ship = next_ship
+	presenter = Presenter.new(ship)
+	current_system = "overview"
+	selected_equipment = ""
+	history.clear()
+	refresh_remaining = 0.0
+	_build_console()
+	return true
+
+
+func _build_console() -> void:
+	_clear(self)
+	nav_buttons.clear()
+	get_window().title = "Chief Engineer / " + ship.definition.display_name
 	_build_shell()
 	_build_view()
 	_refresh()
+
+
+func _on_ship_selected(index: int) -> void:
+	if select_ship(str(ship_selector.get_item_metadata(index))):
+		return
+	# A rejected definition must not leave the menu naming an unloaded ship.
+	ship_selector.select(-1)
+	for item in range(ship_selector.item_count):
+		if ship_selector.get_item_metadata(item) == ship.definition.id:
+			ship_selector.select(item)
+			break
 
 
 func _process(delta: float) -> void:
@@ -124,6 +173,12 @@ func _label(value: String, rect: Rect2, font_size: int, color: Color, parent: No
 func _new_button(value: String, callback: Callable) -> Button:
 	var button := Button.new()
 	button.text = value
+	_style_button(button)
+	button.pressed.connect(callback)
+	return button
+
+
+func _style_button(button: Button) -> void:
 	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	button.add_theme_color_override("font_color", TEXT)
 	button.add_theme_color_override("font_hover_color", TEXT)
@@ -133,8 +188,6 @@ func _new_button(value: String, callback: Callable) -> Button:
 	button.add_theme_stylebox_override("pressed", _style(Color("2a5961"), CYAN))
 	button.add_theme_stylebox_override("disabled", _style(Color("101c26")))
 	button.add_theme_stylebox_override("focus", _style(Color(0, 0, 0, 0), CYAN, 2))
-	button.pressed.connect(callback)
-	return button
 
 
 func _button(value: String, rect: Rect2, callback: Callable, parent: Node) -> Button:
@@ -148,6 +201,24 @@ func _build_shell() -> void:
 	_label(ship.definition.display_name + " / Engineering", Rect2(24, 48, 800, 46), 34, TEXT, self)
 	running_label = _label("", Rect2(900, 20, 508, 27), 14, MUTED, self)
 	running_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	ship_selector = OptionButton.new()
+	_style_button(ship_selector)
+	ship_selector.clip_text = true
+	ship_selector.tooltip_text = "Switch ships. Each keeps its settings; only the selected ship advances."
+	var selected_index: int = -1
+	for definition in ShipCatalog.DEFINITIONS:
+		var index: int = ship_selector.item_count
+		ship_selector.add_item("Ship: " + definition.display_name)
+		ship_selector.set_item_metadata(index, definition.id)
+		var errors: Array[String] = definition.validate()
+		if not errors.is_empty():
+			ship_selector.set_item_disabled(index, true)
+			ship_selector.set_item_tooltip(index, "Invalid ship configuration:\n" + "\n".join(errors))
+		if definition.id == ship.definition.id:
+			selected_index = index
+	ship_selector.select(selected_index)
+	ship_selector.item_selected.connect(_on_ship_selected)
+	_place(ship_selector, Rect2(836, 59, 260, 42), self)
 	pause_button = _button("Pause [P]", Rect2(1110, 59, 142, 42), _pause, self)
 	reset_button = _button("Reset ship", Rect2(1264, 59, 144, 42), _reset_ship, self)
 	_panel(Rect2(24, 128, 196, 742), self)

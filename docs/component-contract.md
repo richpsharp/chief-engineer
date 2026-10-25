@@ -11,6 +11,7 @@ This document describes the shared interfaces for the component refactor.
 - `ship_definition.gd`: `schema_version=1`, `id`, `display_name`, `ambient_temperature=10`, `components: Array[Resource]`, `assemblies: Array[Resource]`, `connections: Array[Resource]`, `views: Array[Dictionary]`, `layouts: Dictionary`.
 - Ship methods: `component(id) -> Resource`, `assembly(id) -> Resource`, `resolve_port(owner, port) -> Dictionary` returning `{component, port, domain, direction}` or `{}`, `resolved_connections() -> Array[Dictionary]` entries `{id, from_component, from_port, to_component, to_port, domain, capacity}`, `validate() -> Array[String]`, `view(id) -> Dictionary`, `workspace_for(component_id) -> String` (first workspace containing component).
 - Default ship: `load("res://ships/kestrel.tres")`. Definitions are treated as immutable; runtime copies settings/state.
+- Playable definitions are listed in `scripts/ship_catalog.gd` as `DEFINITIONS: Array[Resource]`, currently Kestrel and Tern. The catalog contains authored data references, not equipment behavior.
 
 ## Network conventions
 
@@ -68,7 +69,7 @@ An unselected workspace inspector lists its inspectable `members`, independently
 
 Snapshots include schema version, definition ID, step count, fractional time accumulator, queued commands, and detached component settings/state. They are a serialization boundary, not a save/load UI. Incoming frame deltas are capped at 30 seconds to bound catch-up after suspension. Numerical thermal integration uses fixed 0.1-second explicit steps; conductance and heat-capacity tuning should stay within a stable regime. It is not an arbitrary-stiffness engineering solver.
 
-Tests migrate to addressed component state/commands; no legacy named A/B getters. Only Kestrel is shipped in this issue. Mutated copies of its definition are permitted as test fixtures, not a second playable ship.
+Tests use addressed component state/commands; no legacy named A/B getters. Kestrel and Tern are playable authored resources. Detached, transformed copies of definitions remain useful fixtures for exercising validation and topology boundaries.
 
 Control descriptors may specify `max_parameter` (e.g. `rated_power`, `max_flow`). Use `spec.controls()` for effective descriptors resolved against instance parameters, rather than accessing the type's raw list. Kestrel models six separate service loads and one hidden `coolant_reservoir`; main and auxiliary buses both expose capacity and breaker controls.
 
@@ -80,4 +81,14 @@ Operating ranges for `limit`, `flow`, `thrust`, and `deployment` must have nonne
 
 The component framework currently composes a fixed family of equipment behaviors. A new ship can reuse types with different instances, parameters, connections, and nested assemblies. Adding a new machinery behavior requires updating the relevant domain model, validation, and presentation. Assemblies expose descendant ports and ownership; they do not run an additional simulation or consume resources themselves.
 
-Commands are addressed messages queued at fixed-step boundaries. Physical connections describe relationships solved together by the power, coolant, and thermal models; they do not deliver arbitrary messages to component callbacks. This keeps allocation and heat accounting in one place. A general event protocol, behavior plug-in registry, live ship editing, and save restoration are not implemented. The second ship should establish which additional extension points are actually needed. The current console also uses authored positions and a fixed-size panel layout; it is not yet an automatic layout engine for arbitrarily large ships.
+Commands are addressed messages queued at fixed-step boundaries. Physical connections describe relationships solved together by the power, coolant, and thermal models; they do not deliver arbitrary messages to component callbacks. This keeps allocation and heat accounting in one place. A general event protocol, behavior plug-in registry, live ship editing, and save restoration are not implemented. The current console uses authored positions and a fixed-size panel layout; it is not an automatic layout engine for arbitrarily large ships.
+
+## Ship selection and Tern authoring
+
+The console's `select_ship(ship_id) -> bool` selects a catalog definition after the console is ready; unknown IDs are rejected. Invalid catalog definitions are disabled in the selector with validation feedback in their tooltips; a rejected choice keeps the menu on the current ship. Each visited ship has an independent runtime retained for the current app session. Switching clears navigation history and returns to the selected ship's overview. The inactive runtime receives no ticks, so its settings, queued commands, elapsed time, and pause state remain parked. Reset acts only on the current runtime. No sessions survive app restart.
+
+Tern reuses the existing equipment types with 20 components, nine assemblies, and 25 connections. A common reactor and distribution trunk feed independent port and starboard drive branches. Each engine is wired directly to its drive bus, while its pump sits behind a separate feeder bus. Opening a pump feeder therefore tests a cooling dependency without removing the engine's electrical connection. Both engines share coolant storage and heat rejection.
+
+Tern's 144 kW cruise comprises 44 kW of service loads, an 8 kW core pump, two 6 kW drive pumps, and two 40 kW engines. The 220 kW source leaves 76 kW spare. Its authored equilibrium is 40°C reactor, 50°C engines, and 30°C coolant at a 10°C ambient reference: 59.2 kW generated balances 52 kW radiated plus 7.2 kW passive losses. Parameter overrides tune those readings using the unchanged thermal model.
+
+The second ship required only authored ship data, a small catalog, and console selection/session handling. Equipment models, definition schemas, and presentation rules required no ship-specific branches or new behaviors. Different priorities and nested buses exercise the existing radial allocator, while the propulsion summary already supports mean thrust across multiple engines.
