@@ -138,6 +138,7 @@ func _run() -> void:
 		"The overview retains both the closed radiator and its thermal consequences.")
 	await _capture("radiator-advisory.png")
 	await _test_configuration_diagnostics()
+	await _test_equipment_without_schematic()
 	var invalid_definition = console.ship.definition.duplicate(true)
 	invalid_definition.schema_version = -1
 	var invalid_console = MainScene.instantiate()
@@ -147,6 +148,16 @@ func _run() -> void:
 	await process_frame
 	_check(invalid_console.has_node("ConfigurationError") and not invalid_console.is_processing()
 		and invalid_console.nav_buttons.is_empty(), "An invalid ship shows configuration errors instead of an operating console.")
+	invalid_console.queue_free()
+	var missing_label = Fixtures.copy_kestrel()
+	missing_label.component("reactor").definition.controls[0].erase("label")
+	invalid_console = MainScene.instantiate()
+	invalid_console.ship = console.Simulation.new(missing_label)
+	invalid_console.presenter = console.Presenter.new(invalid_console.ship)
+	root.add_child(invalid_console)
+	await process_frame
+	_check(invalid_console.has_node("ConfigurationError") and invalid_console.get_node("ConfigurationError").text.contains("label")
+		and invalid_console.nav_buttons.is_empty(), "Missing control labels show a configuration error before an inspector can fail.")
 	invalid_console.queue_free()
 
 	print("%s: %d interface checks%s." % ["PASS" if failures == 0 else "FAIL", checks,
@@ -189,6 +200,47 @@ func _test_configuration_diagnostics() -> void:
 	_check(console.ship_status.text == "1 condition to inspect" and console.conditions_label.visible
 		and console.conditions_label.text.contains("unpowered") and not console.condition_button.visible,
 		"A condition with no authored destination stays visible without a broken navigation button.")
+	console.queue_free()
+	console = original_console
+	console.show()
+	await process_frame
+
+
+func _test_equipment_without_schematic() -> void:
+	var definition = Fixtures.copy_kestrel()
+	definition.layouts["power"].nodes.erase("battery")
+	definition.view("power").members.append("life_support")
+	console.hide()
+	var original_console = console
+	console = MainScene.instantiate()
+	console.ship = console.Simulation.new(definition)
+	console.presenter = console.Presenter.new(console.ship)
+	root.add_child(console)
+	console.set_process(false)
+	await process_frame
+	console.navigate("power")
+	var listed = console.get("equipment_list_buttons")
+	var reachable: bool = listed is Dictionary and listed.has("battery")
+	_check(reachable and not console.equipment_buttons.has("battery"),
+		"An isolated battery without schematic placement remains reachable in its workspace equipment list.")
+	if reachable:
+		_check(not listed.has("life_support"), "The equipment list respects non-inspectable service components.")
+		await _capture("equipment-list.png")
+		await _click_at_center(listed["battery"])
+		_check(console.selected_equipment == "battery" and console.inspector_title.text == definition.component("battery").display_name,
+			"A real click in the equipment list opens the isolated battery inspector.")
+		_press(console.back_button)
+		_check(console.selected_equipment == "" and console.equipment_list_buttons.has("battery"), "Back restores the workspace equipment list.")
+		definition.layouts["power"].nodes.clear()
+		console.navigate("overview")
+		console.navigate("power")
+		_check(console.equipment_buttons.is_empty() and console.equipment_list_buttons.size() == 4,
+			"A workspace without any schematic positions still lists all four inspectable members.")
+		_press(console.equipment_list_buttons["reactor"])
+		console.control_slider.value = 150.0
+		_tick(0.1)
+		_check(console.selected_equipment == "reactor" and _setting("reactor", "limit") == 150.0,
+			"Equipment opened from the list retains its working operating controls.")
 	console.queue_free()
 	console = original_console
 	console.show()

@@ -20,6 +20,7 @@ var history: Array[Dictionary] = []
 var nav_buttons: Dictionary = {}
 var overview_buttons: Dictionary = {}
 var equipment_buttons: Dictionary = {}
+var equipment_list_buttons: Dictionary = {}
 var dependency_buttons: Array[Button] = []
 var overview_labels: Dictionary = {}
 var equipment_labels: Dictionary = {}
@@ -247,6 +248,7 @@ func _build_view() -> void:
 	overview_buttons.clear()
 	overview_labels.clear()
 	equipment_buttons.clear()
+	equipment_list_buttons.clear()
 	equipment_labels.clear()
 	dependency_buttons.clear()
 	reading_rows.clear()
@@ -331,10 +333,30 @@ func _build_inspector() -> void:
 	_panel(Rect2(990, 264, 418, 606), workspace_layer)
 	if selected_equipment == "":
 		_label("EQUIPMENT INSPECTOR", Rect2(1010, 282, 370, 25), 12, MUTED, workspace_layer)
-		_label("Follow the connections", Rect2(1010, 324, 370, 45), 25, TEXT, workspace_layer)
-		_label("Select equipment on the schematic to see its live readings and controls.", Rect2(1010, 390, 365, 85), 20, MUTED, workspace_layer, true)
-		_label("Connected equipment links let you follow a supply or a load into another workspace. Back retraces your route.", Rect2(1010, 508, 365, 123), 17, MUTED, workspace_layer, true)
-		_label("The ship keeps running as you explore. Pause freezes the simulation and controls.", Rect2(1010, 710, 365, 110), 17, CYAN, workspace_layer, true)
+		_label("Workspace equipment", Rect2(1010, 324, 370, 45), 25, TEXT, workspace_layer)
+		_label("Select equipment here or on the schematic to inspect its readings and controls.", Rect2(1010, 386, 365, 72), 18, MUTED, workspace_layer, true)
+		var equipment_scroll := ScrollContainer.new()
+		equipment_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		equipment_scroll.follow_focus = true
+		_place(equipment_scroll, Rect2(1010, 476, 365, 300), workspace_layer)
+		var equipment_column := VBoxContainer.new()
+		equipment_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		equipment_column.add_theme_constant_override("separation", 8)
+		equipment_scroll.add_child(equipment_column)
+		for id in ship.definition.view(current_system).get("members", []):
+			var member = ship.definition.component(id)
+			if member == null or not member.inspectable or equipment_list_buttons.has(id):
+				continue
+			var button := _new_button(member.display_name + "  ›", navigate.bind(current_system, str(id)))
+			button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			button.clip_text = true
+			button.tooltip_text = member.display_name
+			button.custom_minimum_size.y = 42
+			equipment_column.add_child(button)
+			equipment_list_buttons[id] = button
+		if equipment_list_buttons.is_empty():
+			equipment_column.add_child(_text("No inspectable equipment in this workspace.", 16, MUTED, true))
+		_label("Back retraces your route. Pause freezes the simulation while you explore.", Rect2(1010, 795, 365, 60), 15, MUTED, workspace_layer, true)
 		return
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED

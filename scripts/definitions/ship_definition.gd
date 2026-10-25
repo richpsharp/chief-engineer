@@ -244,6 +244,9 @@ func _validate_component(item: Resource, errors: Array[String]) -> void:
 		control_ids[key] = true
 		if key not in supported_controls[item.definition.kind]:
 			errors.append("Unsupported behavior control: %s:%s" % [item.id, key])
+		var label = control.get("label")
+		if not label is String or label.strip_edges().is_empty():
+			errors.append("Control requires a nonempty string label: %s:%s" % [item.id, key])
 		var control_kind: String = str(control.get("kind", "number"))
 		if (key == "closed" and control_kind != "toggle") or (key != "closed" and control_kind not in ["number", "numeric"]):
 			errors.append("Control value kind does not match behavior: %s:%s" % [item.id, key])

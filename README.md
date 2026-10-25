@@ -20,6 +20,7 @@ The project uses the Compatibility renderer. The portable engine is a local conv
 
 - Select **Power** or **Cooling** from the overview to open its equipment workspace.
 - Select a piece of equipment to see its readings, dependencies, and available controls.
+- The workspace equipment list also opens equipment that has no schematic placement or connections.
 - Use the breadcrumbs or **Back** to move between the overview, workspaces, and equipment.
 - Follow equipment crosslinks to inspect a dependency in another system. A cooling problem may originate in its electrical supply.
 - **Pause** freezes the simulation and operating controls so you can examine the current state. Resume to continue.

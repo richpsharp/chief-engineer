@@ -52,11 +52,15 @@ Views: `{id,name,kind,summary_kind,description,detail,members}`. Kind workspace 
 
 Views may supply `nav_name` as a shorter sidebar label. Power summaries count network boundaries once even with nested member buses; multi-engine summaries report mean thrust. The heat strip reports active radiator rejection; passive thermal losses account for the remaining equilibrium heat loss.
 
+An unselected workspace inspector lists its inspectable `members`, independently of schematic placement or network connections. This keeps isolated equipment accessible and allows workspaces with no authored schematic positions. Hidden (`inspectable=false`) members stay out of the list. Selecting equipment opens its normal inspector, and Back restores the list.
+
 Snapshots include schema version, definition ID, step count, fractional time accumulator, queued commands, and detached component settings/state. They are a serialization boundary, not a save/load UI. Incoming frame deltas are capped at 30 seconds to bound catch-up after suspension. Numerical thermal integration uses fixed 0.1-second explicit steps; conductance and heat-capacity tuning should stay within a stable regime. It is not an arbitrary-stiffness engineering solver.
 
 Tests migrate to addressed component state/commands; no legacy named A/B getters. Only Kestrel is shipped in this issue. Mutated copies of its definition are permitted as test fixtures, not a second playable ship.
 
 Control descriptors may specify `max_parameter` (e.g. `rated_power`, `max_flow`). Use `spec.controls()` for effective descriptors resolved against instance parameters, rather than accessing the type's raw list. Kestrel models six separate service loads and one hidden `coolant_reservoir`; main and auxiliary buses both expose capacity and breaker controls.
+
+Every authored control requires a nonempty String `label`; missing, blank, and non-string labels are configuration errors. This includes toggle controls. Omitting the controls themselves for fixed-capacity equipment remains supported.
 
 Operating ranges for `limit`, `flow`, `thrust`, and `deployment` must have nonnegative minima; negative Celsius temperatures remain valid. Reactor and bus controls may be omitted for fixed-capacity equipment, in which case capacity defaults to `rated_power` and an uncontrolled bus breaker defaults closed. Source status, summaries, and capacity captions read the solver's committed `capacity`, including when no limit control exists. An omitted control cannot receive commands.
 

@@ -1,5 +1,5 @@
 extends SceneTree
-## Authored operating ranges must not permit negative physical outputs.
+## Authored controls must have usable labels and safe operating ranges.
 
 const Simulation = preload("res://scripts/ship_simulation.gd")
 const Fixtures = preload("res://tests/ship_fixtures.gd")
@@ -15,6 +15,7 @@ func _initialize() -> void:
 	_test_negative_operating_ranges()
 	_test_zero_operating_settings()
 	_test_negative_temperatures()
+	_test_control_labels()
 	print("%s: %d control-validation checks (%d failures)." % ["PASS" if failures == 0 else "FAIL", checks, failures])
 	quit(0 if failures == 0 else 1)
 
@@ -58,6 +59,37 @@ func _test_negative_temperatures() -> void:
 	var ship = Simulation.new(definition)
 	_check(ship.components.has("reactor") and ship.components["reactor"].state.temperature == -20.0,
 		"Range validation preserves a negative initial temperature without clamping it.")
+
+
+func _test_control_labels() -> void:
+	for entry in [["reactor", "limit", 100.0], ["main_bus", "closed", true]]:
+		for invalid_label in [null, "", " \t\n", 17]:
+			var definition = Fixtures.copy_kestrel()
+			var component_id: String = entry[0]
+			var action: String = entry[1]
+			for control in definition.component(component_id).definition.controls:
+				if control.id == action:
+					if invalid_label == null:
+						control.erase("label")
+					else:
+						control["label"] = invalid_label
+			var errors: Array[String] = definition.validate()
+			_check(errors.any(func(error): return error.contains("label") and error.contains(component_id + ":" + action)),
+				"Missing, blank, and non-string labels identify the affected numeric or toggle control.")
+			var ship = Simulation.new(definition)
+			_check(not ship.command(component_id, action, entry[2]).accepted,
+				"Invalid control metadata prevents operating commands before an inspector can use it.")
+			ship.tick(0.1)
+			_check(ship.elapsed == 0.0 and ship.components.is_empty(),
+				"A ship with unusable control labels cannot create or advance machinery.")
+	var definition = Fixtures.copy_kestrel()
+	definition.component("reactor").definition.controls[0]["label"] = "Generator capacity"
+	var ship = Simulation.new(definition)
+	_check(definition.validate().is_empty() and ship.components["reactor"].control("limit").label == "Generator capacity",
+		"A custom nonempty label remains valid and reaches runtime control metadata unchanged.")
+	definition.component("reactor").definition.controls.clear()
+	definition.component("reactor").initial_settings.clear()
+	_check(definition.validate().is_empty(), "Fixed-capacity equipment with no controls does not require control labels.")
 
 
 func _check(condition: bool, description: String) -> void:
