@@ -274,6 +274,8 @@ func _validate_views(errors: Array[String]) -> void:
 	var seen: Dictionary = {}
 	for item in views:
 		var view_id: String = str(item.get("id", ""))
+		if view_id == "overview":
+			errors.append("View ID 'overview' is reserved for the ship overview.")
 		if view_id.is_empty() or seen.has(view_id) or item.get("kind", "") not in ["workspace", "summary"]:
 			errors.append("Invalid or duplicate department view: " + view_id)
 		if str(item.get("name", "")).is_empty() or item.get("summary_kind", "") not in ["power", "temperature", "thrust", "load", "reactor"]:

@@ -139,6 +139,7 @@ func _run() -> void:
 	await _capture("radiator-advisory.png")
 	await _test_configuration_diagnostics()
 	await _test_equipment_without_schematic()
+	await _test_view_id_navigation()
 	var invalid_definition = console.ship.definition.duplicate(true)
 	invalid_definition.schema_version = -1
 	var invalid_console = MainScene.instantiate()
@@ -241,6 +242,43 @@ func _test_equipment_without_schematic() -> void:
 		_tick(0.1)
 		_check(console.selected_equipment == "reactor" and _setting("reactor", "limit") == 150.0,
 			"Equipment opened from the list retains its working operating controls.")
+	console.queue_free()
+	console = original_console
+	console.show()
+	await process_frame
+
+
+func _test_view_id_navigation() -> void:
+	var definition = Fixtures.copy_kestrel()
+	definition.view("power")["id"] = "electrical"
+	definition.layouts["electrical"] = definition.layouts["power"]
+	definition.layouts.erase("power")
+	console.hide()
+	var original_console = console
+	console = MainScene.instantiate()
+	console.ship = console.Simulation.new(definition)
+	console.presenter = console.Presenter.new(console.ship)
+	root.add_child(console)
+	console.set_process(false)
+	await process_frame
+	_press(console.nav_buttons["electrical"])
+	_press(console.equipment_list_buttons["battery"])
+	_check(console.current_system == "electrical" and console.selected_equipment == "battery"
+		and is_instance_valid(console.inspector_title), "A renamed workspace still opens its equipment inspector.")
+	_press(console.nav_buttons["overview"])
+	_check(console.current_system == "overview" and console.overview_buttons.size() == 8,
+		"The built-in overview remains reachable alongside renamed workspaces.")
+	console.queue_free()
+	definition.view("electrical")["id"] = "overview"
+	definition.layouts["overview"] = definition.layouts["electrical"]
+	definition.layouts.erase("electrical")
+	console = MainScene.instantiate()
+	console.ship = console.Simulation.new(definition)
+	console.presenter = console.Presenter.new(console.ship)
+	root.add_child(console)
+	await process_frame
+	_check(console.has_node("ConfigurationError") and console.get_node("ConfigurationError").text.contains("overview")
+		and console.nav_buttons.is_empty(), "A reserved view ID shows a configuration error instead of broken navigation.")
 	console.queue_free()
 	console = original_console
 	console.show()

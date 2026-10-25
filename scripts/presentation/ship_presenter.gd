@@ -164,7 +164,8 @@ func equipment_reason(id: String) -> String:
 				_:
 					reason = "Allocated electrical supply is below this equipment's demand."
 		"Cooling limited", "No circulation":
-			reason = "Circulation limits this equipment. Inspect " + _name(_cooling_cause(id)) + "."
+			var cause: String = _cooling_cause(id)
+			reason = "Combined circulation is insufficient for this equipment. Inspect its coolant connections and flow settings." if cause == id else "Circulation limits this equipment. Inspect " + _name(cause) + "."
 		"Isolated":
 			reason = "Its breaker is open. Close it to restore downstream supply."
 		"Offline":
@@ -374,13 +375,23 @@ func _visible_neighbors(id: String, domain: String, outgoing: bool) -> Array[Str
 
 
 func _cooling_cause(id: String) -> String:
+	var pumps: Array[String] = []
 	for edge in connections:
-		if edge.domain == "coolant" and edge.to_component == id:
-			var pump_id: String = edge.from_component
-			if equipment_status(pump_id) == "Power limited":
+		if edge.domain == "coolant" and edge.to_component == id and edge.from_component not in pumps:
+			pumps.append(edge.from_component)
+	pumps.sort()
+	# Prefer an observed restriction across all contributors. Link declaration
+	# order must not turn a healthy pump into the cause of a shared shortfall.
+	for status in ["Power limited", "Idle", "Ramping"]:
+		for pump_id in pumps:
+			if _operating_status(pump_id) != status:
+				continue
+			if status == "Power limited":
 				return str(ship.components[pump_id].power_constraint.get("component_id", pump_id))
 			return pump_id
-	return id
+	# A sole supply is still the useful target for a low flow setting. With
+	# several healthy supplies, keep their aggregate shortfall at the consumer.
+	return pumps[0] if pumps.size() == 1 else id
 
 
 func _has_member_power_upstream(id: String, members: Array) -> bool:

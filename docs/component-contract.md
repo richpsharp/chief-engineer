@@ -28,6 +28,8 @@ This document describes the shared interfaces for the component refactor.
 - States initially: pump `flow`; engine `thrust`, `temperature`; reactor/coolant `temperature`. Settings provide initial requests.
 - Supported electrical graph: radial source/bus distribution, one power input per consumer, no cycles/crossfeeds; explicitly validated. Load priority is ship data, tie broken by stable instance ID. Initial phases preserve existing priority and do not redistribute unused ramp allocations within the same step.
 
+An engine's published electrical demand is the demand considered during allocation. If a lower-priority pump subsequently increases circulation, that extra capability becomes available for allocation on the next step. Falling circulation still immediately reduces engine demand, allocation, and output to keep operation safe. This prevents pump startup from appearing as an electrical shortage.
+
 ## Runtime API
 
 `ShipSimulation.new(optional_definition)`; default Kestrel. Properties `definition`, `components: Dictionary`, `paused`, `elapsed`, `events: Array[String]` (bounded to 50), `validation_errors: Array[String]`, `command_results: Array[Dictionary]` (bounded to 50), read-only `step_seconds=.1`.
@@ -46,11 +48,15 @@ Methods `tick(delta)`, `reset()`, `toggle_pause()`, `command(target_id, action, 
 
 Operating conditions and thermal advisories are independent. A closed radiator with hot coolant reports both facts; an offline reactor can still hold heat. The equipment status gives operating restrictions precedence, while its explanation also includes connected temperature advisories. `conditions()` retains every applicable condition regardless of the single status label. Engine supply and cooling status use the simulation's published `requested_power`, `allocated_power`, and `cooling_limit`; the presenter does not repeat the physical conversion formulas.
 
+Cooling diagnostics consider every contributing pump, independently of connection declaration order. They prefer a demonstrated electrical restriction, then an idle or ramping pump. A sole supply remains an inspection target for insufficient flow settings. When several pumps meet their settings but their combined circulation is insufficient, the condition stays on the affected equipment and explains the aggregate shortfall; links expose each contributing supply.
+
 Conditions with no inspectable equipment route to a view containing the affected component, with `equipment` empty. If no authored view contains it, both `system` and `equipment` are empty: the warning still counts and displays without an inspect button. A connection-limited condition includes `connection_id` and routes to the receiving equipment when possible.
 
 Views: `{id,name,kind,summary_kind,description,detail,members}`. Kind workspace or summary. Summary kinds power/temperature/thrust/load/reactor. Members are leaf IDs for aggregation/navigation; departments may overlap. Layouts keyed by view ID: `{nodes: Dictionary}` maps leaf IDs to `Rect2`. Schematic edges derive from connections and the visible endpoints (no duplicated wiring lists). Thermal-only hidden coolant reservoir may be omitted from initial schematic.
 
 Views may supply `nav_name` as a shorter sidebar label. Power summaries count network boundaries once even with nested member buses; multi-engine summaries report mean thrust. The heat strip reports active radiator rejection; passive thermal losses account for the remaining equilibrium heat loss.
+
+The view ID `overview` is reserved for the built-in ship overview. Authored workspaces and summaries must use other IDs; the validator rejects this collision before the console starts.
 
 An unselected workspace inspector lists its inspectable `members`, independently of schematic placement or network connections. This keeps isolated equipment accessible and allows workspaces with no authored schematic positions. Hidden (`inspectable=false`) members stay out of the list. Selecting equipment opens its normal inspector, and Back restores the list.
 

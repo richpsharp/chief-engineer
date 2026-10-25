@@ -86,7 +86,10 @@ func solve(delta: float) -> void:
 			part.state["cooling_limit"] = limit
 			part.state["target_thrust"] = minf(float(part.state["target_thrust"]), limit)
 			part.state["thrust"] = minf(float(part.state["thrust"]), limit)
-			part.state["requested_power"] = _request(part, id)
+			# Preserve demand from allocation when circulation rises later in
+			# this step; extra cooling capacity becomes usable next step.
+			# Falling circulation can still remove now-unsafe demand.
+			part.state["requested_power"] = minf(float(part.state["requested_power"]), _request(part, id))
 			part.state["allocated_power"] = minf(float(part.state["allocated_power"]), float(part.state["requested_power"]))
 			if float(part.state["allocated_power"]) >= float(part.state["requested_power"]):
 				part.power_constraint = {}

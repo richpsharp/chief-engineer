@@ -16,6 +16,7 @@ func _initialize() -> void:
 	_test_commands_and_fixed_steps()
 	_test_renamed_and_reordered_definition()
 	_test_invalid_definitions()
+	_test_view_identifiers()
 	_test_connection_capacity_and_accounting()
 	_test_thermal_energy_accounting()
 	_test_continuous_temperature_readings()
@@ -158,6 +159,29 @@ func _test_renamed_and_reordered_definition() -> void:
 		renamed.tick(20.0)
 		_check(_equivalent_components(original, renamed, mapping), "Behavior follows component kinds and connections rather than IDs or declaration order.")
 	_check(_near(original.totals().output, renamed.totals().output), "Source accounting is invariant under the transformed Kestrel fixture.")
+
+
+func _test_view_identifiers() -> void:
+	for original_id in ["power", "reactor"]:
+		var definition = Fixtures.copy_kestrel()
+		definition.view(original_id)["id"] = "overview"
+		if definition.layouts.has(original_id):
+			definition.layouts["overview"] = definition.layouts[original_id]
+			definition.layouts.erase(original_id)
+		var errors: Array[String] = definition.validate()
+		_check(errors.any(func(error): return error.contains("overview") and error.contains("reserved")),
+			"Workspace and summary views cannot shadow the reserved overview route: " + original_id)
+		var ship = Simulation.new(definition)
+		_check(not ship.validation_errors.is_empty() and ship.components.is_empty(),
+			"A reserved view ID prevents machinery initialization: " + original_id)
+		ship.tick(0.1)
+		_check(ship.elapsed == 0.0 and not ship.command("reactor", "limit", 100.0).accepted,
+			"A ship with a reserved view ID cannot advance or accept commands: " + original_id)
+		definition.view("overview")["id"] = "renamed_" + original_id
+		if definition.layouts.has("overview"):
+			definition.layouts["renamed_" + original_id] = definition.layouts["overview"]
+			definition.layouts.erase("overview")
+		_check(definition.validate().is_empty(), "Other authored workspace and summary IDs remain supported: " + original_id)
 
 
 func _test_invalid_definitions() -> void:
