@@ -81,7 +81,7 @@ func _run() -> void:
 	_follow_link("main_engine")
 	_check(console.selected_equipment == "main_engine" and _near(_s("main_engine", "thrust"), 15.0),
 		"Following pump B to the engine shows the resulting 15 percent thrust.")
-	_check(console.reading_rows.size() == 7 and console.reading_rows[6].value.text.contains("°C/min"),
+	_check(console.reading_rows.any(func(row): return row.key.text == "Temperature trend" and row.value.text.contains("°C/min")),
 		"The engine inspector includes the continuous temperature trend alongside its operating readings.")
 	await _capture("limited.png")
 	_press(console.back_button)
@@ -127,7 +127,7 @@ func _run() -> void:
 	console.navigate("cooling", "heat_exchanger")
 	_check(console.inspector_condition.text.contains("Temperature advisory") and console.inspector_condition.text.contains("°C/min"),
 		"A temperature advisory explains connected temperatures and their trends in the inspector.")
-	_check(console.reading_rows.size() == 6 and console.reading_rows[4].value.text.contains("°C/min") and console.reading_rows[5].value.text.contains("°C/min"),
+	_check(console.reading_rows.filter(func(row): return row.value.text.contains("°C/min")).size() == 2,
 		"The exchanger inspector shows separate readings for both connected thermal masses.")
 	await _capture("thermal.png")
 	console.navigate("cooling", "radiator")

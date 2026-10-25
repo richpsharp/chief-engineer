@@ -6,5 +6,5 @@
 script = ExtResource("1")
 kind = "pump"
 ports = {"power_in": {"domain": "power", "direction": "in"}, "flow_out": {"domain": "coolant", "direction": "out"}}
-defaults = {"kw_per_flow": 0.4, "max_flow": 40, "response_seconds": 1.5, "priority": 20}
+defaults = {"kw_per_flow": 0.4, "max_flow": 40, "response_seconds": 1.5, "priority": 20, "rated_life_hours": 10000.0, "life_reference_flow": 30.0, "reliability_seed": 1}
 controls = Array[Dictionary]([{"id": "flow", "label": "Requested flow", "unit": "L/s", "min": 0, "max": 40, "default": 30, "max_parameter": "max_flow"}])

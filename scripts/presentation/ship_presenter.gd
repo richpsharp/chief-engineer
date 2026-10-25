@@ -82,6 +82,12 @@ func readings(id: String) -> Array[Array]:
 		if thermal.size() > 1:
 			value = _temp(reading.temperature) + " / " + value
 		result.append([label, value])
+	var maintenance: Dictionary = ship.maintenance_info(id)
+	if runtime.kind not in ["battery", "coolant"]:
+		result.append(["Operating hours", "%.1f h" % float(maintenance.running_hours)])
+	result.append(["Nominal service life", "%.0f h" % float(maintenance.rated_life_hours) if maintenance.rated_life_hours > 0 else "Not rated"])
+	if maintenance.supported:
+		result.append(["Flow efficiency", _percent(float(maintenance.efficiency) * 100.0)])
 	return result
 
 
@@ -109,12 +115,19 @@ func _operating_status(id: String) -> String:
 				return "Isolated"
 			return "Limited" if _number(id, "requested_power") > _number(id, "allocated_power") + 0.1 else "Online"
 		"pump":
+			var maintenance: Dictionary = ship.maintenance_info(id)
+			if not str(maintenance.job).is_empty():
+				return "Maintenance"
+			if maintenance.failed:
+				return "Failed"
 			var request: float = float(settings.get("flow", 0))
 			if request <= 0:
 				return "Idle"
-			if _number(id, "target_flow") < request - 0.1:
+			if _number(id, "allocated_power") < _number(id, "requested_power") - 0.1:
 				return "Power limited"
-			return "Ramping" if _number(id, "flow") < request - 0.1 else "Online"
+			if float(maintenance.efficiency) < 0.999:
+				return "Patched" if maintenance.patch_remaining_hours > 0 else "Degraded"
+			return "Ramping" if _number(id, "flow") < _number(id, "target_flow") - 0.1 else "Online"
 		"engine":
 			var request: float = float(settings.get("thrust", 0))
 			if request <= 0:
@@ -151,6 +164,8 @@ func equipment_reason(id: String) -> String:
 	var status: String = equipment_status(id)
 	var reason: String = str(ship.components[id].spec.description)
 	match status:
+		"Failed", "Maintenance", "Degraded", "Patched":
+			reason = str(ship.maintenance_info(id).reason)
 		"Power limited", "Limited", "Brownout", "Unpowered":
 			var constraint: Dictionary = ship.components[id].power_constraint
 			var cause: String = str(constraint.get("component_id", id))
@@ -237,7 +252,7 @@ func system_summary(view_id: String) -> Dictionary:
 		"thrust": value = "%.1f%% mean thrust" % (total / engines) if engines > 1 else "%.1f%% thrust" % total
 		"temperature": value = "%.1f°C peak temperature" % temperatures.max() if not temperatures.is_empty() else "No temperature readings"
 	var status: String = "Online"
-	for candidate in ["Temperature advisory", "Unpowered", "Offline", "Isolated", "Power limited", "Cooling limited", "No circulation", "Limited", "Brownout", "Closed", "Limited rejection", "Ramping"]:
+	for candidate in ["Failed", "Maintenance", "Temperature advisory", "Unpowered", "Offline", "Isolated", "Power limited", "Cooling limited", "No circulation", "Degraded", "Patched", "Limited", "Brownout", "Closed", "Limited rejection", "Ramping"]:
 		if candidate in statuses:
 			status = candidate
 			break
@@ -255,6 +270,12 @@ func conditions() -> Array[Dictionary]:
 			if advisory.component_id == id:
 				pending.append(advisory)
 		var status: String = _operating_status(id)
+		# A supply problem or idle setting can coexist with worn machinery.
+		# Keep the wear condition discoverable without hiding the supply cause.
+		if ship.components[id].kind == "pump":
+			var maintenance: Dictionary = ship.maintenance_info(id)
+			if float(maintenance.efficiency) < 0.999 and status not in ["Failed", "Maintenance", "Degraded", "Patched"]:
+				pending.append({"code": "pump.degraded", "component_id": id, "cause_id": id, "text": _name(id) + ": worn pump, reduced flow efficiency."})
 		if status in ["Online", "Idle", "Standby reference", "Reference", "Ramping"]:
 			continue
 		var cause: String = id
@@ -385,7 +406,7 @@ func _cooling_cause(id: String) -> String:
 	pumps.sort()
 	# Prefer an observed restriction across all contributors. Link declaration
 	# order must not turn a healthy pump into the cause of a shared shortfall.
-	for status in ["Power limited", "Idle", "Ramping"]:
+	for status in ["Power limited", "Failed", "Maintenance", "Degraded", "Patched", "Idle", "Ramping"]:
 		for pump_id in pumps:
 			if _operating_status(pump_id) != status:
 				continue

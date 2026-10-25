@@ -80,6 +80,27 @@ These are simplified gameplay relationships, not a real electrical or thermal en
 
 For a shared-system experiment, reduce the utility reactor's capacity to **100 kW**. Services and pumps retain priority; the port engine receives enough power for 18% thrust and the starboard engine stops. Reset ship restores healthy cruise. Closing the shared radiator instead warms both engines and the common coolant.
 
+## Pump service life and maintenance
+
+Equipment keeps an operating-hour counter. Pumps also have an authored reference service life and a separate, load-weighted wear-part service age. Tern's pumps begin with 1,000 operating hours against a 10,000-hour reference rating; they still start at full efficiency. Normal cruising does not require repeated maintenance clicks.
+
+Open a pump's **Service life** panel to compare estimated failure rate and expected flow efficiency against service age. The bathtub curve represents failure risk per operating hour; the performance chart has normal, degraded, and severe-loss bands. These are illustrative gameplay curves, not manufacturer predictions, confidence intervals, or guaranteed expiry dates. The current-age marker follows equivalent wear-part hours: heavy operation ages them faster than the actual clock. Replacing them does not erase the assembly's lifetime running hours.
+
+Try this on Tern:
+
+1. Open **Cooling → Port pump → Service life** and choose **Try worn-pump condition**. This explicit sandbox action gives the pump a worn service history immediately.
+2. Compare nominal requested flow, delivered flow, electrical draw, and port-engine output. The starboard drive continues operating normally. Raising the pump request can compensate for wear, at the cost of more power and faster wear.
+3. Follow the panel's electrical-supply shortcut to **Port pump feed** and open its breaker. A zero flow request or lack of spare reactor capacity is not electrical isolation.
+4. Return to the pump's service panel. Apply a temporary patch or replace its wear parts. The ship has three patch kits and two replacement spares, with one maintenance job at a time.
+5. A patch takes 10 simulated seconds and provides limited capability for 100 operating hours. Replacing wear parts takes 30 simulated seconds, restores efficiency, and resets wear-part age. Supplies are spent when work starts; cancelling does not refund them.
+6. Close the feeder after work finishes and observe the pump and engine recover. The other drive remains available throughout the repair.
+
+Reconnecting a pump during maintenance holds the job and keeps the pump unavailable until isolation is restored. Pause freezes work; an unselected ship's work remains parked. Reset restores its authored history, machinery, and supplies. Current sessions are not saved when the app closes.
+
+Failures are repeatable for the same authored seed and operating history. Their probability accumulates with operating time and the age-dependent hazard; a failed pump needs replacement. A temporary patch improves output but does not rejuvenate its worn parts or remove their failure risk.
+
+The lifetime distinction is inspired by [bearing life ratings](https://www.jtekt.co.jp/products/bearing/en/support/bearing-knowledge/5-2000.html) and [NIST's explanation of the bathtub failure-rate curve](https://www.itl.nist.gov/div898/handbook/apr/section1/apr124.htm). The values and repair durations here are authored for play. The current redundancy is Tern's independent propulsion branches; live crossfeeds, pipe bypasses, and conserved coolant inventory are future extensions.
+
 ## How the prototype is built
 
 - `scenes/main.tscn` is the starting scene.
@@ -87,6 +108,7 @@ For a shared-system experiment, reduce the utility reactor's capacity to **100 k
 - `ships/tern.tres` defines Tern using the same equipment types and domain models. `scripts/ship_catalog.gd` lists the selectable definitions.
 - `scripts/definitions/` contains the Resource schemas for reusable component types, component instances, assemblies, typed connections, and ships.
 - `scripts/ship_simulation.gd` creates independent runtime state from a ship definition and advances its machinery in fixed 0.1-second steps. It owns command validation and physical calculations.
+- `scripts/simulation/maintenance_model.gd` owns operating history, pump wear and failure risk, repair supplies, and maintenance jobs.
 - `scripts/presentation/ship_presenter.gd` turns numerical runtime readings into labels, status explanations, conditions, and dependency links.
 - `scripts/main.gd` builds the interface from the ship's view and equipment metadata. Controls send addressed commands; they do not directly change physical state.
 - `tests/test_simulation.gd` checks the simulation rules.
@@ -96,6 +118,7 @@ For a shared-system experiment, reduce the utility reactor's capacity to **100 k
 - `tests/test_power_ramp.gd` checks allocation diagnostics when pumps ramp after their engines; `tests/test_cooling_diagnostics.gd` checks diagnosis across multiple coolant supplies. The test suites share detached ship fixtures from `tests/ship_fixtures.gd`.
 - `tests/test_thermal_connections.gd` checks thermal connection readings and schematic activity for exposed reservoirs, multiple inlets, and stopped or reversed heat transfer.
 - `tests/test_tern.gd` checks sustained healthy cruise and the two independent propulsion branches. `tests/test_ship_selection.gd` exercises selection, retained sessions, both ships' navigation, and the Tern experiment through the console.
+- `tests/test_maintenance.gd` checks lifetime accounting, wear, repair safety, and repeatable failures. `tests/test_maintenance_interface.gd` exercises the repair loop and service-life panels through the console.
 
 ### Components, ports, and assemblies
 
@@ -134,6 +157,8 @@ godot --headless --path . --script tests/test_cooling_diagnostics.gd
 godot --headless --path . --script tests/test_thermal_connections.gd
 godot --headless --path . --script tests/test_tern.gd
 godot --headless --path . --script tests/test_ship_selection.gd
+godot --headless --path . --script tests/test_maintenance.gd
+godot --headless --path . --script tests/test_maintenance_interface.gd
 godot --headless --path . --script tests/test_interface.gd
 godot --headless --path . --quit-after 3
 ```

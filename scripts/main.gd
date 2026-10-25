@@ -4,6 +4,7 @@ extends Control
 const Simulation = preload("res://scripts/ship_simulation.gd")
 const Presenter = preload("res://scripts/presentation/ship_presenter.gd")
 const ShipCatalog = preload("res://scripts/ship_catalog.gd")
+const MaintenancePanel = preload("res://scripts/presentation/maintenance_panel.gd")
 const INK = Color("08121c")
 const PANEL = Color("101f2c")
 const BORDER = Color("294050")
@@ -38,6 +39,8 @@ var control_value: Label
 var control_widgets: Array[Dictionary] = []
 var inspector_title: Label
 var inspector_condition: Label
+var maintenance_button: Button
+var maintenance_panel: Control
 var reading_rows: Array = []
 var supply_label: Label
 var cooling_label: Label
@@ -98,6 +101,7 @@ func select_ship(ship_id: String) -> bool:
 
 
 func _build_console() -> void:
+	close_maintenance()
 	_clear(self)
 	nav_buttons.clear()
 	get_window().title = "Chief Engineer / " + ship.definition.display_name
@@ -314,6 +318,7 @@ func _clear(parent: Node) -> void:
 
 
 func _build_view() -> void:
+	close_maintenance()
 	_clear(workspace_layer)
 	_clear(breadcrumb_layer)
 	overview_buttons.clear()
@@ -329,6 +334,7 @@ func _build_view() -> void:
 	breaker_button = null
 	inspector_title = null
 	inspector_condition = null
+	maintenance_button = null
 	summary_value = null
 	conditions_label = null
 	condition_button = null
@@ -463,6 +469,10 @@ func _build_inspector() -> void:
 	column.add_child(_text(spec.description, 14, MUTED, true))
 	inspector_condition = _text("", 14, GREEN, true)
 	column.add_child(inspector_condition)
+	maintenance_button = _new_button("Service life & maintenance ›", open_maintenance.bind(selected_equipment))
+	maintenance_button.add_theme_font_size_override("font_size", 14)
+	maintenance_button.custom_minimum_size.y = 36
+	column.add_child(maintenance_button)
 	column.add_child(HSeparator.new())
 	for reading in presenter.readings(selected_equipment):
 		var row := HBoxContainer.new()
@@ -498,6 +508,8 @@ func _build_inspector() -> void:
 			slider.step = float(descriptor.get("step", 1))
 			slider.custom_minimum_size = Vector2(0, 26)
 			slider.tooltip_text = str(descriptor.label)
+			if spec.definition.kind == "pump" and action == "flow":
+				slider.tooltip_text = "Nominal flow request. Wear reduces delivered flow; increasing this setting uses more power and can accelerate wear."
 			slider.value_changed.connect(_change_control.bind(action))
 			column.add_child(slider)
 			control_widgets.append({"descriptor": descriptor, "slider": slider, "value": value_label})
@@ -595,6 +607,8 @@ func _refresh() -> void:
 			summary_detail.text = summary.detail
 	if log_dialog.visible:
 		_refresh_log()
+	if is_instance_valid(maintenance_panel):
+		maintenance_panel.refresh()
 
 func _refresh_inspector() -> void:
 	if selected_equipment == "":
@@ -649,6 +663,7 @@ func _pause() -> void:
 
 
 func _reset_ship() -> void:
+	close_maintenance()
 	ship.reset()
 	_refresh()
 	queue_redraw()
@@ -670,7 +685,36 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if event.keycode == KEY_P:
 			_pause()
 		elif event.keycode == KEY_ESCAPE:
-			_back()
+			if is_instance_valid(maintenance_panel):
+				close_maintenance()
+			else:
+				_back()
+
+
+func open_maintenance(id: String) -> void:
+	if not ship.components.has(id) or not ship.definition.component(id).inspectable:
+		return
+	close_maintenance()
+	maintenance_panel = MaintenancePanel.new()
+	add_child(maintenance_panel)
+	maintenance_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	maintenance_panel.close_requested.connect(close_maintenance)
+	maintenance_panel.inspect_requested.connect(_inspect_maintenance_supply)
+	maintenance_panel.configure(ship, presenter, id)
+
+
+func close_maintenance() -> void:
+	if is_instance_valid(maintenance_panel):
+		remove_child(maintenance_panel)
+		maintenance_panel.queue_free()
+	maintenance_panel = null
+	if is_instance_valid(maintenance_button) and maintenance_button.is_inside_tree():
+		maintenance_button.grab_focus()
+
+
+func _inspect_maintenance_supply(system: String, equipment: String) -> void:
+	close_maintenance()
+	navigate(system, equipment)
 
 
 func _line(points: PackedVector2Array, color: Color, energized: bool) -> void:

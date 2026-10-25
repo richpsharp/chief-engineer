@@ -19,6 +19,7 @@ const ConnectionResource = preload("res://scripts/definitions/connection_definit
 @export var connections: Array[Resource] = []
 @export var views: Array[Dictionary] = []
 @export var layouts: Dictionary = {}
+@export var maintenance_supplies: Dictionary = {"patches": 3, "spares": 2}
 
 
 func component(component_id: String) -> Resource:
@@ -93,6 +94,12 @@ func validate() -> Array[String]:
 		errors.append("Unsupported ship schema version: %d." % schema_version)
 	if id.is_empty() or not is_finite(ambient_temperature):
 		errors.append("Ship identity and finite ambient temperature are required.")
+	for key in ["patches", "spares"]:
+		if not maintenance_supplies.get(key) is int or int(maintenance_supplies.get(key, -1)) < 0:
+			errors.append("Maintenance supplies must be non-negative integer counts: " + key)
+	for key in maintenance_supplies:
+		if key not in ["patches", "spares"]:
+			errors.append("Unknown maintenance supply: " + str(key))
 	for item in components:
 		if not item is SpecResource:
 			errors.append("Components must be ComponentSpec resources.")
@@ -231,6 +238,12 @@ func _validate_component(item: Resource, errors: Array[String]) -> void:
 	for key in ["rated_power", "max_flow", "passive_loss", "heat_fraction", "service_heat_fraction", "transfer_coefficient", "rejection_coefficient"]:
 		if config.has(key) and (not _number(config[key]) or float(config[key]) < 0.0):
 			errors.append("Parameter must be non-negative: %s:%s" % [item.id, key])
+	if config.has("rated_life_hours") and (not _number(config.rated_life_hours) or float(config.rated_life_hours) < 0.000001 or float(config.rated_life_hours) > 1.0e12):
+		errors.append("Life rating must be finite and between 0.000001 and 1e12 hours: " + item.id)
+	if config.has("life_reference_flow") and (not _number(config.life_reference_flow) or float(config.life_reference_flow) < 0.000001 or float(config.life_reference_flow) > 1.0e12):
+		errors.append("Life reference flow must be finite and between 0.000001 and 1e12 L/s: " + item.id)
+	if config.has("reliability_seed") and (not config.reliability_seed is int or int(config.reliability_seed) < 0 or int(config.reliability_seed) > 2147483647):
+		errors.append("Reliability seed must be an integer from 0 through 2147483647: " + item.id)
 	var control_ids: Dictionary = {}
 	var supported_controls: Dictionary = {
 		"reactor": ["limit"], "bus": ["limit", "closed"], "pump": ["flow"],
@@ -266,6 +279,18 @@ func _validate_component(item: Resource, errors: Array[String]) -> void:
 			errors.append("Initial state must contain finite numeric readings: %s:%s" % [item.id, key])
 		elif key in ["flow", "thrust"] and float(item.initial_state[key]) < 0.0:
 			errors.append("Initial output cannot be negative: %s:%s" % [item.id, key])
+		elif key in ["running_hours", "service_age_hours", "patch_remaining_hours", "risk_exposure", "replacement_count"] and float(item.initial_state[key]) < 0.0:
+			errors.append("Lifetime state cannot be negative: %s:%s" % [item.id, key])
+		elif key in ["running_hours", "service_age_hours", "patch_remaining_hours"] and float(item.initial_state[key]) > 1.0e12:
+			errors.append("Lifetime state exceeds the supported 1e12-hour range: %s:%s" % [item.id, key])
+		elif key == "failed" and float(item.initial_state[key]) not in [0.0, 1.0]:
+			errors.append("Initial failed state must be zero or one: " + item.id)
+		elif key == "replacement_count" and (float(item.initial_state[key]) != floorf(float(item.initial_state[key])) or float(item.initial_state[key]) > 2147483647.0):
+			errors.append("Initial replacement count must be a whole number no greater than 2147483647: " + item.id)
+		elif key in ["failure_threshold", "failure_rate", "efficiency", "maintenance_locked"]:
+			errors.append("Derived maintenance state cannot be authored: %s:%s" % [item.id, key])
+		if key in ["failed", "patch_remaining_hours", "risk_exposure", "replacement_count"] and (item.definition.kind != "pump" or not config.has("rated_life_hours")):
+			errors.append("Pump maintenance state requires a pump life profile: %s:%s" % [item.id, key])
 	if item.definition.kind in ["reactor", "engine", "coolant"] and not _number(item.initial_state.get("temperature")):
 		errors.append("Thermal component requires an initial temperature: " + item.id)
 

@@ -99,9 +99,9 @@ short_name = "Core pump"
 description = "Circulates the shared reactor exchanger and radiator. Both drive loops depend on this common heat rejection."
 parent_id = "utility_plant"
 definition = ExtResource("type_pump")
-parameters = {"kw_per_flow":0.4,"max_flow":32,"priority":20}
+parameters = {"kw_per_flow":0.4,"max_flow":32,"priority":20,"life_reference_flow":20.0,"reliability_seed":101}
 initial_settings = {"flow":20}
-initial_state = {"flow":20}
+initial_state = {"flow":20,"running_hours":1000.0,"service_age_hours":1000.0}
 inspectable = true
 
 [sub_resource type="Resource" id="port_pump"]
@@ -112,9 +112,9 @@ short_name = "Port pump"
 description = "Cools only the port engine. Its dedicated electrical feed can be isolated from the Power workspace."
 parent_id = "port_module"
 definition = ExtResource("type_pump")
-parameters = {"kw_per_flow":0.3,"max_flow":30,"priority":30}
+parameters = {"kw_per_flow":0.3,"max_flow":30,"priority":30,"life_reference_flow":20.0,"reliability_seed":102}
 initial_settings = {"flow":20}
-initial_state = {"flow":20}
+initial_state = {"flow":20,"running_hours":1000.0,"service_age_hours":1000.0}
 inspectable = true
 
 [sub_resource type="Resource" id="starboard_pump"]
@@ -125,9 +125,9 @@ short_name = "Starboard pump"
 description = "Cools only the starboard engine. The other drive keeps its own electrical and circulation supply."
 parent_id = "starboard_module"
 definition = ExtResource("type_pump")
-parameters = {"kw_per_flow":0.3,"max_flow":30,"priority":31}
+parameters = {"kw_per_flow":0.3,"max_flow":30,"priority":31,"life_reference_flow":20.0,"reliability_seed":103}
 initial_settings = {"flow":20}
-initial_state = {"flow":20}
+initial_state = {"flow":20,"running_hours":1000.0,"service_age_hours":1000.0}
 inspectable = true
 
 [sub_resource type="Resource" id="core_exchanger"]

@@ -11,6 +11,7 @@ static func copy_kestrel():
 	copied.display_name = Kestrel.display_name
 	copied.schema_version = Kestrel.schema_version
 	copied.ambient_temperature = Kestrel.ambient_temperature
+	copied.maintenance_supplies = Kestrel.maintenance_supplies.duplicate(true)
 	for item in Kestrel.components:
 		var spec = item.duplicate(true)
 		spec.definition = item.definition.duplicate(true)
