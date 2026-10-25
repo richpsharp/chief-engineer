@@ -1,0 +1,654 @@
+[gd_resource type="Resource" script_class="ShipDefinition" format=3]
+
+[ext_resource type="Script" path="res://scripts/definitions/ship_definition.gd" id="ship"]
+[ext_resource type="Script" path="res://scripts/definitions/component_spec.gd" id="spec"]
+[ext_resource type="Script" path="res://scripts/definitions/assembly_definition.gd" id="assembly"]
+[ext_resource type="Script" path="res://scripts/definitions/connection_definition.gd" id="connection"]
+[ext_resource type="Resource" path="res://ships/types/reactor.tres" id="type_reactor"]
+[ext_resource type="Resource" path="res://ships/types/bus.tres" id="type_bus"]
+[ext_resource type="Resource" path="res://ships/types/pump.tres" id="type_pump"]
+[ext_resource type="Resource" path="res://ships/types/engine.tres" id="type_engine"]
+[ext_resource type="Resource" path="res://ships/types/load.tres" id="type_load"]
+[ext_resource type="Resource" path="res://ships/types/heat_exchanger.tres" id="type_heat_exchanger"]
+[ext_resource type="Resource" path="res://ships/types/radiator.tres" id="type_radiator"]
+[ext_resource type="Resource" path="res://ships/types/coolant.tres" id="type_coolant"]
+
+[sub_resource type="Resource" id="utility_reactor"]
+script = ExtResource("spec")
+id = "utility_reactor"
+display_name = "Utility reactor"
+short_name = "Reactor"
+description = "Shared generation for both drive branches and the utility services."
+parent_id = "utility_plant"
+definition = ExtResource("type_reactor")
+parameters = {"rated_power":220,"heat_capacity":100}
+initial_settings = {"limit":220}
+initial_state = {"temperature":40}
+inspectable = true
+
+[sub_resource type="Resource" id="distribution_bus"]
+script = ExtResource("spec")
+id = "distribution_bus"
+display_name = "Main distribution trunk"
+short_name = "Main trunk"
+description = "Supplies shared services and the two independent drive branches."
+parent_id = "utility_distribution"
+definition = ExtResource("type_bus")
+parameters = {"rated_power":220}
+initial_settings = {"limit":220,"closed":true}
+initial_state = {}
+inspectable = true
+
+[sub_resource type="Resource" id="port_bus"]
+script = ExtResource("spec")
+id = "port_bus"
+display_name = "Port drive bus"
+short_name = "Port bus"
+description = "Supplies the port engine and its separately isolatable coolant-pump feed."
+parent_id = "port_drive"
+definition = ExtResource("type_bus")
+parameters = {"rated_power":80}
+initial_settings = {"limit":80,"closed":true}
+initial_state = {}
+inspectable = true
+
+[sub_resource type="Resource" id="starboard_bus"]
+script = ExtResource("spec")
+id = "starboard_bus"
+display_name = "Starboard drive bus"
+short_name = "Starbd bus"
+description = "Supplies the starboard engine and its separately isolatable coolant-pump feed."
+parent_id = "starboard_drive"
+definition = ExtResource("type_bus")
+parameters = {"rated_power":80}
+initial_settings = {"limit":80,"closed":true}
+initial_state = {}
+inspectable = true
+
+[sub_resource type="Resource" id="port_pump_feed"]
+script = ExtResource("spec")
+id = "port_pump_feed"
+display_name = "Port pump feed"
+short_name = "Port pump feed"
+description = "Open this breaker to stop the port coolant pump while its engine remains electrically connected. Follow the pump link to see the loss of thrust."
+parent_id = "port_drive"
+definition = ExtResource("type_bus")
+parameters = {"rated_power":12}
+initial_settings = {"limit":12,"closed":true}
+initial_state = {}
+inspectable = true
+
+[sub_resource type="Resource" id="starboard_pump_feed"]
+script = ExtResource("spec")
+id = "starboard_pump_feed"
+display_name = "Starboard pump feed"
+short_name = "Starboard feed"
+description = "Open this breaker to stop the starboard coolant pump while its engine remains electrically connected. The port drive has its own cooling feed."
+parent_id = "starboard_drive"
+definition = ExtResource("type_bus")
+parameters = {"rated_power":12}
+initial_settings = {"limit":12,"closed":true}
+initial_state = {}
+inspectable = true
+
+[sub_resource type="Resource" id="core_pump"]
+script = ExtResource("spec")
+id = "core_pump"
+display_name = "Core circulation pump"
+short_name = "Core pump"
+description = "Circulates the shared reactor exchanger and radiator. Both drive loops depend on this common heat rejection."
+parent_id = "utility_plant"
+definition = ExtResource("type_pump")
+parameters = {"kw_per_flow":0.4,"max_flow":32,"priority":20}
+initial_settings = {"flow":20}
+initial_state = {"flow":20}
+inspectable = true
+
+[sub_resource type="Resource" id="port_pump"]
+script = ExtResource("spec")
+id = "port_pump"
+display_name = "Port coolant pump"
+short_name = "Port pump"
+description = "Cools only the port engine. Its dedicated electrical feed can be isolated from the Power workspace."
+parent_id = "port_module"
+definition = ExtResource("type_pump")
+parameters = {"kw_per_flow":0.3,"max_flow":30,"priority":30}
+initial_settings = {"flow":20}
+initial_state = {"flow":20}
+inspectable = true
+
+[sub_resource type="Resource" id="starboard_pump"]
+script = ExtResource("spec")
+id = "starboard_pump"
+display_name = "Starboard coolant pump"
+short_name = "Starboard pump"
+description = "Cools only the starboard engine. The other drive keeps its own electrical and circulation supply."
+parent_id = "starboard_module"
+definition = ExtResource("type_pump")
+parameters = {"kw_per_flow":0.3,"max_flow":30,"priority":31}
+initial_settings = {"flow":20}
+initial_state = {"flow":20}
+inspectable = true
+
+[sub_resource type="Resource" id="core_exchanger"]
+script = ExtResource("spec")
+id = "core_exchanger"
+display_name = "Core heat exchanger"
+short_name = "Core exchanger"
+description = "Transfers reactor heat into the common coolant inventory using the core pump."
+parent_id = "utility_plant"
+definition = ExtResource("type_heat_exchanger")
+parameters = {"transfer_coefficient":0.084}
+initial_settings = {}
+initial_state = {}
+inspectable = true
+
+[sub_resource type="Resource" id="port_engine"]
+script = ExtResource("spec")
+id = "port_engine"
+display_name = "Port utility engine"
+short_name = "Port engine"
+description = "Cruises at 20 percent thrust. Loss of its coolant pump reduces this engine without cutting the starboard drive."
+parent_id = "port_module"
+definition = ExtResource("type_engine")
+parameters = {"kw_per_thrust":2,"heat_fraction":0.5,"transfer_coefficient":0.045,"heat_capacity":80,"passive_loss":0.05,"priority":50}
+initial_settings = {"thrust":20}
+initial_state = {"thrust":20,"temperature":50}
+inspectable = true
+
+[sub_resource type="Resource" id="starboard_engine"]
+script = ExtResource("spec")
+id = "starboard_engine"
+display_name = "Starboard utility engine"
+short_name = "Starboard engine"
+description = "Cruises at 20 percent thrust on its own drive bus and coolant pump. Shares the reactor and heat rejection with the port drive."
+parent_id = "starboard_module"
+definition = ExtResource("type_engine")
+parameters = {"kw_per_thrust":2,"heat_fraction":0.5,"transfer_coefficient":0.045,"heat_capacity":80,"passive_loss":0.05,"priority":51}
+initial_settings = {"thrust":20}
+initial_state = {"thrust":20,"temperature":50}
+inspectable = true
+
+[sub_resource type="Resource" id="radiator"]
+script = ExtResource("spec")
+id = "radiator"
+display_name = "Shared radiator bank"
+short_name = "Shared radiator"
+description = "Rejects heat from both engines and the reactor. Core-pump circulation and deployment determine the shared rejection capacity."
+parent_id = "heat_rejection"
+definition = ExtResource("type_radiator")
+parameters = {"rejection_coefficient":2.6,"reference_flow":20}
+initial_settings = {"deployment":100}
+initial_state = {}
+inspectable = true
+
+[sub_resource type="Resource" id="coolant_reservoir"]
+script = ExtResource("spec")
+id = "coolant_reservoir"
+display_name = "Shared coolant inventory"
+short_name = "Shared coolant"
+description = "Thermal storage common to the reactor and both drive loops."
+parent_id = "heat_rejection"
+definition = ExtResource("type_coolant")
+parameters = {"heat_capacity":300}
+initial_settings = {}
+initial_state = {"temperature":30}
+inspectable = false
+
+[sub_resource type="Resource" id="life_support"]
+script = ExtResource("spec")
+id = "life_support"
+display_name = "Life support"
+short_name = "Life support"
+description = "Essential cabin and crew-support electrical load."
+parent_id = "utility_distribution"
+definition = ExtResource("type_load")
+parameters = {"rated_power":18,"priority":10}
+initial_settings = {}
+initial_state = {}
+inspectable = false
+
+[sub_resource type="Resource" id="avionics"]
+script = ExtResource("spec")
+id = "avionics"
+display_name = "Flight avionics"
+short_name = "Avionics"
+description = "Flight control electronics supplied before propulsion loads."
+parent_id = "utility_distribution"
+definition = ExtResource("type_load")
+parameters = {"rated_power":4,"priority":11}
+initial_settings = {}
+initial_state = {}
+inspectable = false
+
+[sub_resource type="Resource" id="hull_services"]
+script = ExtResource("spec")
+id = "hull_services"
+display_name = "Utility hull services"
+short_name = "Hull services"
+description = "Compartment electronics and utility handling controls."
+parent_id = "utility_distribution"
+definition = ExtResource("type_load")
+parameters = {"rated_power":6,"priority":12}
+initial_settings = {}
+initial_state = {}
+inspectable = false
+
+[sub_resource type="Resource" id="shielding"]
+script = ExtResource("spec")
+id = "shielding"
+display_name = "Radiation protection"
+short_name = "Radiation"
+description = "Protective-field standby electronics."
+parent_id = "utility_distribution"
+definition = ExtResource("type_load")
+parameters = {"rated_power":3,"priority":13}
+initial_settings = {}
+initial_state = {}
+inspectable = false
+
+[sub_resource type="Resource" id="sensors"]
+script = ExtResource("spec")
+id = "sensors"
+display_name = "Utility sensors"
+short_name = "Sensors"
+description = "Survey and approach sensor electronics."
+parent_id = "utility_distribution"
+definition = ExtResource("type_load")
+parameters = {"rated_power":5,"priority":14}
+initial_settings = {}
+initial_state = {}
+inspectable = false
+
+[sub_resource type="Resource" id="habitat"]
+script = ExtResource("spec")
+id = "habitat"
+display_name = "Habitat services"
+short_name = "Habitat"
+description = "Crew-space and accommodation electrical services."
+parent_id = "utility_distribution"
+definition = ExtResource("type_load")
+parameters = {"rated_power":8,"priority":15}
+initial_settings = {}
+initial_state = {}
+inspectable = false
+
+[sub_resource type="Resource" id="assembly_engineering"]
+script = ExtResource("assembly")
+id = "engineering"
+display_name = "Engineering"
+parent_id = ""
+ports = {}
+
+[sub_resource type="Resource" id="assembly_utility_plant"]
+script = ExtResource("assembly")
+id = "utility_plant"
+display_name = "Utility power plant"
+parent_id = "engineering"
+ports = {"electrical":{"component":"utility_reactor","port":"power_out"},"heat":{"component":"utility_reactor","port":"heat_out"}}
+
+[sub_resource type="Resource" id="assembly_utility_distribution"]
+script = ExtResource("assembly")
+id = "utility_distribution"
+display_name = "Shared distribution"
+parent_id = "engineering"
+ports = {"trunk_in":{"component":"distribution_bus","port":"power_in"}}
+
+[sub_resource type="Resource" id="assembly_twin_drive"]
+script = ExtResource("assembly")
+id = "twin_drive"
+display_name = "Twin propulsion"
+parent_id = "engineering"
+ports = {"port_supply":{"component":"port_drive","port":"supply"},"starboard_supply":{"component":"starboard_drive","port":"supply"},"port_heat":{"component":"port_drive","port":"heat_out"},"starboard_heat":{"component":"starboard_drive","port":"heat_out"}}
+
+[sub_resource type="Resource" id="assembly_port_drive"]
+script = ExtResource("assembly")
+id = "port_drive"
+display_name = "Port drive branch"
+parent_id = "twin_drive"
+ports = {"supply":{"component":"port_bus","port":"power_in"},"engine_power":{"component":"port_module","port":"power_in"},"pump_power":{"component":"port_module","port":"pump_power"},"flow_in":{"component":"port_module","port":"flow_in"},"heat_out":{"component":"port_module","port":"heat_out"}}
+
+[sub_resource type="Resource" id="assembly_starboard_drive"]
+script = ExtResource("assembly")
+id = "starboard_drive"
+display_name = "Starboard drive branch"
+parent_id = "twin_drive"
+ports = {"supply":{"component":"starboard_bus","port":"power_in"},"engine_power":{"component":"starboard_module","port":"power_in"},"pump_power":{"component":"starboard_module","port":"pump_power"},"flow_in":{"component":"starboard_module","port":"flow_in"},"heat_out":{"component":"starboard_module","port":"heat_out"}}
+
+[sub_resource type="Resource" id="assembly_port_module"]
+script = ExtResource("assembly")
+id = "port_module"
+display_name = "Port engine module"
+parent_id = "port_drive"
+ports = {"power_in":{"component":"port_engine","port":"power_in"},"pump_power":{"component":"port_pump","port":"power_in"},"flow_in":{"component":"port_engine","port":"flow_in"},"heat_out":{"component":"port_engine","port":"heat_out"}}
+
+[sub_resource type="Resource" id="assembly_starboard_module"]
+script = ExtResource("assembly")
+id = "starboard_module"
+display_name = "Starboard engine module"
+parent_id = "starboard_drive"
+ports = {"power_in":{"component":"starboard_engine","port":"power_in"},"pump_power":{"component":"starboard_pump","port":"power_in"},"flow_in":{"component":"starboard_engine","port":"flow_in"},"heat_out":{"component":"starboard_engine","port":"heat_out"}}
+
+[sub_resource type="Resource" id="assembly_heat_rejection"]
+script = ExtResource("assembly")
+id = "heat_rejection"
+display_name = "Shared heat rejection"
+parent_id = "engineering"
+ports = {}
+
+[sub_resource type="Resource" id="link_source_trunk"]
+script = ExtResource("connection")
+id = "source_trunk"
+from_component = "utility_plant"
+from_port = "electrical"
+to_component = "utility_distribution"
+to_port = "trunk_in"
+
+[sub_resource type="Resource" id="link_trunk_port"]
+script = ExtResource("connection")
+id = "trunk_port"
+from_component = "distribution_bus"
+from_port = "power_out"
+to_component = "twin_drive"
+to_port = "port_supply"
+
+[sub_resource type="Resource" id="link_trunk_starboard"]
+script = ExtResource("connection")
+id = "trunk_starboard"
+from_component = "distribution_bus"
+from_port = "power_out"
+to_component = "twin_drive"
+to_port = "starboard_supply"
+
+[sub_resource type="Resource" id="link_feed_life_support"]
+script = ExtResource("connection")
+id = "feed_life_support"
+from_component = "distribution_bus"
+from_port = "power_out"
+to_component = "life_support"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_feed_avionics"]
+script = ExtResource("connection")
+id = "feed_avionics"
+from_component = "distribution_bus"
+from_port = "power_out"
+to_component = "avionics"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_feed_hull_services"]
+script = ExtResource("connection")
+id = "feed_hull_services"
+from_component = "distribution_bus"
+from_port = "power_out"
+to_component = "hull_services"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_feed_shielding"]
+script = ExtResource("connection")
+id = "feed_shielding"
+from_component = "distribution_bus"
+from_port = "power_out"
+to_component = "shielding"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_feed_sensors"]
+script = ExtResource("connection")
+id = "feed_sensors"
+from_component = "distribution_bus"
+from_port = "power_out"
+to_component = "sensors"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_feed_habitat"]
+script = ExtResource("connection")
+id = "feed_habitat"
+from_component = "distribution_bus"
+from_port = "power_out"
+to_component = "habitat"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_feed_core_pump"]
+script = ExtResource("connection")
+id = "feed_core_pump"
+from_component = "distribution_bus"
+from_port = "power_out"
+to_component = "core_pump"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_port_engine_power"]
+script = ExtResource("connection")
+id = "port_engine_power"
+from_component = "port_bus"
+from_port = "power_out"
+to_component = "port_drive"
+to_port = "engine_power"
+
+[sub_resource type="Resource" id="link_port_pump_source"]
+script = ExtResource("connection")
+id = "port_pump_source"
+from_component = "port_bus"
+from_port = "power_out"
+to_component = "port_pump_feed"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_port_pump_power"]
+script = ExtResource("connection")
+id = "port_pump_power"
+from_component = "port_pump_feed"
+from_port = "power_out"
+to_component = "port_drive"
+to_port = "pump_power"
+
+[sub_resource type="Resource" id="link_starboard_engine_power"]
+script = ExtResource("connection")
+id = "starboard_engine_power"
+from_component = "starboard_bus"
+from_port = "power_out"
+to_component = "starboard_drive"
+to_port = "engine_power"
+
+[sub_resource type="Resource" id="link_starboard_pump_source"]
+script = ExtResource("connection")
+id = "starboard_pump_source"
+from_component = "starboard_bus"
+from_port = "power_out"
+to_component = "starboard_pump_feed"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_starboard_pump_power"]
+script = ExtResource("connection")
+id = "starboard_pump_power"
+from_component = "starboard_pump_feed"
+from_port = "power_out"
+to_component = "starboard_drive"
+to_port = "pump_power"
+
+[sub_resource type="Resource" id="link_core_circulation"]
+script = ExtResource("connection")
+id = "core_circulation"
+from_component = "core_pump"
+from_port = "flow_out"
+to_component = "core_exchanger"
+to_port = "flow_in"
+
+[sub_resource type="Resource" id="link_radiator_circulation"]
+script = ExtResource("connection")
+id = "radiator_circulation"
+from_component = "core_pump"
+from_port = "flow_out"
+to_component = "radiator"
+to_port = "flow_in"
+
+[sub_resource type="Resource" id="link_port_circulation"]
+script = ExtResource("connection")
+id = "port_circulation"
+from_component = "port_pump"
+from_port = "flow_out"
+to_component = "port_drive"
+to_port = "flow_in"
+
+[sub_resource type="Resource" id="link_starboard_circulation"]
+script = ExtResource("connection")
+id = "starboard_circulation"
+from_component = "starboard_pump"
+from_port = "flow_out"
+to_component = "starboard_drive"
+to_port = "flow_in"
+
+[sub_resource type="Resource" id="link_core_heat"]
+script = ExtResource("connection")
+id = "core_heat"
+from_component = "utility_plant"
+from_port = "heat"
+to_component = "core_exchanger"
+to_port = "heat_in"
+
+[sub_resource type="Resource" id="link_core_to_coolant"]
+script = ExtResource("connection")
+id = "core_to_coolant"
+from_component = "core_exchanger"
+from_port = "heat_out"
+to_component = "coolant_reservoir"
+to_port = "heat_in"
+
+[sub_resource type="Resource" id="link_port_to_coolant"]
+script = ExtResource("connection")
+id = "port_to_coolant"
+from_component = "twin_drive"
+from_port = "port_heat"
+to_component = "coolant_reservoir"
+to_port = "heat_in"
+
+[sub_resource type="Resource" id="link_starboard_to_coolant"]
+script = ExtResource("connection")
+id = "starboard_to_coolant"
+from_component = "twin_drive"
+from_port = "starboard_heat"
+to_component = "coolant_reservoir"
+to_port = "heat_in"
+
+[sub_resource type="Resource" id="link_coolant_to_radiator"]
+script = ExtResource("connection")
+id = "coolant_to_radiator"
+from_component = "coolant_reservoir"
+from_port = "heat_out"
+to_component = "radiator"
+to_port = "heat_in"
+
+[resource]
+script = ExtResource("ship")
+schema_version = 1
+id = "tern"
+display_name = "Tern"
+ambient_temperature = 10.0
+components = Array[Resource]([SubResource("utility_reactor"), SubResource("distribution_bus"), SubResource("port_bus"), SubResource("starboard_bus"), SubResource("port_pump_feed"), SubResource("starboard_pump_feed"), SubResource("core_pump"), SubResource("port_pump"), SubResource("starboard_pump"), SubResource("core_exchanger"), SubResource("port_engine"), SubResource("starboard_engine"), SubResource("radiator"), SubResource("coolant_reservoir"), SubResource("life_support"), SubResource("avionics"), SubResource("hull_services"), SubResource("shielding"), SubResource("sensors"), SubResource("habitat")])
+assemblies = Array[Resource]([SubResource("assembly_engineering"), SubResource("assembly_utility_plant"), SubResource("assembly_utility_distribution"), SubResource("assembly_twin_drive"), SubResource("assembly_port_drive"), SubResource("assembly_starboard_drive"), SubResource("assembly_port_module"), SubResource("assembly_starboard_module"), SubResource("assembly_heat_rejection")])
+connections = Array[Resource]([SubResource("link_source_trunk"), SubResource("link_trunk_port"), SubResource("link_trunk_starboard"), SubResource("link_feed_life_support"), SubResource("link_feed_avionics"), SubResource("link_feed_hull_services"), SubResource("link_feed_shielding"), SubResource("link_feed_sensors"), SubResource("link_feed_habitat"), SubResource("link_feed_core_pump"), SubResource("link_port_engine_power"), SubResource("link_port_pump_source"), SubResource("link_port_pump_power"), SubResource("link_starboard_engine_power"), SubResource("link_starboard_pump_source"), SubResource("link_starboard_pump_power"), SubResource("link_core_circulation"), SubResource("link_radiator_circulation"), SubResource("link_port_circulation"), SubResource("link_starboard_circulation"), SubResource("link_core_heat"), SubResource("link_core_to_coolant"), SubResource("link_port_to_coolant"), SubResource("link_starboard_to_coolant"), SubResource("link_coolant_to_radiator")])
+views = Array[Dictionary]([
+  {
+    "id": "reactor",
+    "name": "Reactor",
+    "kind": "summary",
+    "summary_kind": "reactor",
+    "description": "Shared generation for two utility drives",
+    "detail": "One reactor supplies both branches through the common trunk.",
+    "members": [
+      "utility_reactor"
+    ]
+  },
+  {
+    "id": "power",
+    "name": "Power",
+    "kind": "workspace",
+    "summary_kind": "power",
+    "description": "Shared trunk, independent drives, and pump isolation",
+    "detail": "Open a pump feed, then follow the loss of engine cooling.",
+    "members": [
+      "utility_reactor",
+      "distribution_bus",
+      "port_bus",
+      "starboard_bus",
+      "port_pump_feed",
+      "starboard_pump_feed"
+    ]
+  },
+  {
+    "id": "propulsion",
+    "name": "Propulsion",
+    "kind": "summary",
+    "summary_kind": "thrust",
+    "description": "Port and starboard utility drives",
+    "detail": "Separate drive loops share the reactor and radiator.",
+    "members": [
+      "port_engine",
+      "starboard_engine"
+    ]
+  },
+  {
+    "id": "cooling",
+    "name": "Cooling",
+    "kind": "workspace",
+    "summary_kind": "temperature",
+    "description": "Independent drive circulation and shared heat rejection",
+    "detail": "Separate drive pumps; shared core cooling and heat rejection.",
+    "members": [
+      "core_pump",
+      "core_exchanger",
+      "radiator",
+      "port_pump",
+      "port_engine",
+      "starboard_pump",
+      "starboard_engine",
+      "coolant_reservoir"
+    ]
+  },
+  {
+    "id": "life_support",
+    "name": "Life support",
+    "kind": "summary",
+    "summary_kind": "load",
+    "description": "Cabin and habitat electrical services",
+    "detail": "Crew services are supplied before propulsion loads.",
+    "members": [
+      "life_support",
+      "habitat"
+    ]
+  },
+  {
+    "id": "shielding",
+    "name": "Radiation protection",
+    "nav_name": "Radiation",
+    "kind": "summary",
+    "summary_kind": "load",
+    "description": "Radiation-protection services",
+    "detail": "Protective standby electronics on the shared trunk.",
+    "members": [
+      "shielding"
+    ]
+  },
+  {
+    "id": "sensors",
+    "name": "Sensors",
+    "kind": "summary",
+    "summary_kind": "load",
+    "description": "Survey and approach sensors",
+    "detail": "The sensor suite has its own priority on the shared trunk.",
+    "members": [
+      "sensors"
+    ]
+  },
+  {
+    "id": "hull",
+    "name": "Hull & compartments",
+    "nav_name": "Hull",
+    "kind": "summary",
+    "summary_kind": "load",
+    "description": "Compartment and utility handling electronics",
+    "detail": "Electrical utility services; structural damage is not modeled.",
+    "members": [
+      "hull_services"
+    ]
+  }
+])
+layouts = {"power": {"nodes": {"utility_reactor": Rect2(250, 538, 174, 106), "distribution_bus": Rect2(430, 538, 174, 106), "port_bus": Rect2(610, 386, 174, 106), "starboard_bus": Rect2(610, 674, 174, 106), "port_pump_feed": Rect2(790, 386, 174, 106), "starboard_pump_feed": Rect2(790, 674, 174, 106)}}, "cooling": {"nodes": {"core_pump": Rect2(266, 366, 186, 106), "core_exchanger": Rect2(514, 366, 198, 106), "port_pump": Rect2(266, 520, 186, 106), "port_engine": Rect2(514, 520, 198, 106), "starboard_pump": Rect2(266, 674, 186, 106), "starboard_engine": Rect2(514, 674, 198, 106), "radiator": Rect2(770, 495, 190, 106)}}}

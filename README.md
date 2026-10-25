@@ -1,6 +1,6 @@
 # Chief Engineer
 
-A Godot prototype for exploring an operating starship through its engineering systems. The ship starts healthy and runs continuously. Change a setting, follow its effects through connected equipment, and restore the ship to normal operation.
+A Godot prototype for exploring operating starships through their engineering systems. Kestrel and Tern start healthy and run continuously. Change a setting, follow its effects through connected equipment, and restore the ship to normal operation.
 
 The overview presents eight ship systems: Reactor, Power, Propulsion, Cooling, Life support, Radiation protection, Sensors, and Hull & compartments. **Power** and **Cooling** have detailed workspaces, equipment inspectors, and working controls. The other six currently provide summaries and basic load references; they do not yet have the same depth of simulation.
 
@@ -18,17 +18,23 @@ The project uses the Compatibility renderer. The portable engine is a local conv
 
 ## Explore the ship
 
+- Use the **Ship** selector at the top to switch between **Kestrel** and **Tern**. Each keeps its settings, operating state, and pause state for this session; only the selected ship advances. Switching returns to its overview.
 - Select **Power** or **Cooling** from the overview to open its equipment workspace.
 - Select a piece of equipment to see its readings, dependencies, and available controls.
 - The workspace equipment list also opens equipment that has no schematic placement or connections.
 - Use the breadcrumbs or **Back** to move between the overview, workspaces, and equipment.
 - Follow equipment crosslinks to inspect a dependency in another system. A cooling problem may originate in its electrical supply.
 - **Pause** freezes the simulation and operating controls so you can examine the current state. Resume to continue.
-- **Reset** restores the healthy starting configuration.
+- **Reset ship** restores the selected ship's healthy starting configuration. The other ship keeps its state. Closing the app ends both sessions.
 
 Press **P** to pause or resume, and **Escape** to go back.
 
 There is no countdown, win condition, or loss screen. Leaving the initial controls alone keeps the ship running normally. Equipment performance and recovery evolve over time as you experiment.
+
+| Ship | Engines at cruise | Buses / pumps | Cruise draw / capacity |
+| --- | --- | --- | --- |
+| Kestrel | One at 30% | 2 / 2 | 152 / 200 kW |
+| Tern, a twin-engine utility ship | Two at 20% each | 5 / 3 | 144 / 220 kW |
 
 ## Controls currently modeled
 
@@ -36,19 +42,23 @@ There is no countdown, win condition, or loss screen. Leaving the initial contro
 
 The reactor automatically supplies the demand it can meet, up to its configured capacity limit. That limit is available capacity, not a command to generate a fixed amount of power.
 
-The main and auxiliary buses have breaker controls. The auxiliary bus also has a total power limit shared by its loads. Its healthy demand is **30 kW**: **18 kW** of base loads plus **12 kW** for cooling pump B. The normal auxiliary limit is **40 kW**.
+Kestrel's main and auxiliary buses have breaker controls. The auxiliary bus also has a total power limit shared by its loads. Its healthy demand is **30 kW**: **18 kW** of base loads plus **12 kW** for cooling pump B. The normal auxiliary limit is **40 kW**.
+
+Tern has a shared distribution trunk and separate port and starboard drive buses. Each drive includes a dedicated pump feeder: opening that feeder cuts its coolant pump's power while leaving the engine's electrical feed connected.
 
 ### Cooling
 
-Pump A normally runs at a flow setting of **24 L/s**, and pump B at **30 L/s**. Their delivered flow depends on available electrical power as well as the requested setting. Radiator deployment starts at **100%**.
+Kestrel's pump A normally runs at a flow setting of **24 L/s**, and pump B at **30 L/s**. Their delivered flow depends on available electrical power as well as the requested setting. Radiator deployment starts at **100%**.
 
 Pump A also circulates coolant through the shared radiator. Stopping it prevents active heat rejection even with the radiator fully deployed; temperatures then respond to the heat still being produced.
 
-The main-engine inspector in Cooling includes an engine command, initially **30%**. Actual engine performance is constrained by the cooling it receives. Power, flow, temperatures, and engine output provide different views of the same dependencies.
+Kestrel's main-engine inspector in Cooling includes an engine command, initially **30%**. Actual engine performance is constrained by the cooling it receives. Power, flow, temperatures, and engine output provide different views of the same dependencies.
+
+Tern's three pumps each start at **20 L/s**. The port and starboard pumps serve their own engines, initially at **20%** thrust each. The core pump serves the reactor exchanger and shared radiator. Both engines reject heat into the shared coolant reservoir.
 
 Temperature readings include their current rate of change in °C/min. Heat exchangers show the temperatures of both connected thermal masses. A temperature advisory reports the measurement, trend, and amount above the configured advisory level; changing that level does not change the simulation's heat flow or equipment output.
 
-## A first experiment
+## Kestrel experiment
 
 1. Open **Power** and select the **auxiliary bus**. Observe its normal 30 kW demand against a 40 kW limit.
 2. Lower its limit to **24 kW**. The 18 kW base load leaves only **6 kW** for pump B, half of its normal 12 kW supply.
@@ -60,10 +70,21 @@ This is a way to learn the ship through cause and effect: the reduced engine out
 
 These are simplified gameplay relationships, not a real electrical or thermal engineering solver.
 
+## Tern experiment
+
+1. Choose **Ship: Tern**, open **Power**, and select **Port pump feed**.
+2. Open its breaker. The port pump loses power while the port engine's electrical branch remains connected.
+3. Follow **Supplies: Port pump**, then **Circulates to: Port engine**. Its thrust falls to zero because cooling has stopped. The starboard engine continues at 20%.
+4. Return to the pump feed and close the breaker. Watch the pump and engine recover gradually to cruise.
+5. Repeat with **Starboard feed** to test the other branch.
+
+For a shared-system experiment, reduce the utility reactor's capacity to **100 kW**. Services and pumps retain priority; the port engine receives enough power for 18% thrust and the starboard engine stops. Reset ship restores healthy cruise. Closing the shared radiator instead warms both engines and the common coolant.
+
 ## How the prototype is built
 
 - `scenes/main.tscn` is the starting scene.
 - `ships/kestrel.tres` defines Kestrel's equipment, assemblies, connections, initial settings, views, and schematic layouts.
+- `ships/tern.tres` defines Tern using the same equipment types and domain models. `scripts/ship_catalog.gd` lists the selectable definitions.
 - `scripts/definitions/` contains the Resource schemas for reusable component types, component instances, assemblies, typed connections, and ships.
 - `scripts/ship_simulation.gd` creates independent runtime state from a ship definition and advances its machinery in fixed 0.1-second steps. It owns command validation and physical calculations.
 - `scripts/presentation/ship_presenter.gd` turns numerical runtime readings into labels, status explanations, conditions, and dependency links.
@@ -74,6 +95,7 @@ These are simplified gameplay relationships, not a real electrical or thermal en
 - `tests/test_control_validation.gd` checks authored operating ranges, labels, and safe zero settings.
 - `tests/test_power_ramp.gd` checks allocation diagnostics when pumps ramp after their engines; `tests/test_cooling_diagnostics.gd` checks diagnosis across multiple coolant supplies. The test suites share detached ship fixtures from `tests/ship_fixtures.gd`.
 - `tests/test_thermal_connections.gd` checks thermal connection readings and schematic activity for exposed reservoirs, multiple inlets, and stopped or reversed heat transfer.
+- `tests/test_tern.gd` checks sustained healthy cruise and the two independent propulsion branches. `tests/test_ship_selection.gd` exercises selection, retained sessions, both ships' navigation, and the Tern experiment through the console.
 
 ### Components, ports, and assemblies
 
@@ -93,9 +115,9 @@ Controls address a component ID and control ID, such as an auxiliary bus's `limi
 
 The electrical solver currently supports radial distribution with one power input per consumer. Load priority is authored data; equal priorities are ordered by stable component ID. It does not simulate electrical loops or crossfeeds. Coolant connections describe circulation capability, not pipe pressure or a conserved fluid inventory. Thermal behavior is a simplified heat-storage and transfer model. The battery remains an isolated reference component, and the summary departments are not detailed environmental simulations.
 
-**Kestrel is the only playable ship included.** Tests use modified copies of its definition to verify the architecture; they do not add another ship or a ship-selection feature.
+**Kestrel and Tern are playable ship definitions.** Tern adds equipment and topology entirely as data: five nested buses, three pumps, two engines, and a shared thermal plant. It required no changes to equipment behaviors, network solvers, or the presenter. The shared console adds a catalog-driven selector and retains independent runtimes for the selected ships.
 
-Start in `kestrel.tres` to change equipment configuration or connections, in component type parameters to tune behavior, and in the presenter/interface to change how readings are explained. The shared API is documented in [the component contract](docs/component-contract.md).
+Start in a ship's `.tres` file to change equipment configuration or connections, in component type parameters to tune behavior, and in the presenter/interface to change how readings are explained. Register additional playable definitions in `ship_catalog.gd`. The shared API is documented in [the component contract](docs/component-contract.md).
 
 The older `tracer.py` and `fact-mod-example/` remain as earlier experiments and are not used by this Godot prototype.
 
@@ -110,6 +132,8 @@ godot --headless --path . --script tests/test_control_validation.gd
 godot --headless --path . --script tests/test_power_ramp.gd
 godot --headless --path . --script tests/test_cooling_diagnostics.gd
 godot --headless --path . --script tests/test_thermal_connections.gd
+godot --headless --path . --script tests/test_tern.gd
+godot --headless --path . --script tests/test_ship_selection.gd
 godot --headless --path . --script tests/test_interface.gd
 godot --headless --path . --quit-after 3
 ```
