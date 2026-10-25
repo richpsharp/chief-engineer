@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="EquipmentType" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/definitions/component_type.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+kind = "radiator"
+ports = {"flow_in": {"domain": "coolant", "direction": "in"}, "heat_in": {"domain": "thermal", "direction": "in"}}
+defaults = {"rejection_coefficient": 2.51, "reference_flow": 24, "warning_deployment": 30}
+controls = Array[Dictionary]([{"id": "deployment", "label": "Panel deployment", "unit": "%", "min": 0, "max": 100, "default": 100}])

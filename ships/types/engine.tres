@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="EquipmentType" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/definitions/component_type.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+kind = "engine"
+ports = {"power_in": {"domain": "power", "direction": "in"}, "flow_in": {"domain": "coolant", "direction": "in"}, "heat_out": {"domain": "thermal", "direction": "out"}}
+defaults = {"kw_per_thrust": 2.4, "flow_per_thrust": 1, "response_seconds": 2.5, "heat_fraction": 0.55, "transfer_coefficient": 0.05347826086956521, "heat_capacity": 100, "passive_loss": 0.06, "warning_temperature": 90, "priority": 50}
+controls = Array[Dictionary]([{"id": "thrust", "label": "Commanded thrust", "unit": "%", "min": 0, "max": 60, "default": 30}])

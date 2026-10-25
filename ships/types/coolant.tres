@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="EquipmentType" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/definitions/component_type.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+kind = "coolant"
+ports = {"heat_in": {"domain": "thermal", "direction": "in"}, "heat_out": {"domain": "thermal", "direction": "out"}}
+defaults = {"heat_capacity": 200, "passive_loss": 0.04, "warning_temperature": 55}
+controls = Array[Dictionary]([])
