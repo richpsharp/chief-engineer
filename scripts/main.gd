@@ -477,9 +477,9 @@ func _refresh() -> void:
 			labels.detail.text = summary.detail + "   ›"
 		conditions_label.text = "Standing watch • no active limitations" if conditions.is_empty() else str(conditions[0].text)
 		conditions_label.add_theme_color_override("font_color", MUTED if conditions.is_empty() else AMBER)
-		condition_button.visible = not conditions.is_empty()
-		conditions_label.visible = conditions.is_empty()
-		if not conditions.is_empty():
+		condition_button.visible = not conditions.is_empty() and not str(conditions[0].system).is_empty()
+		conditions_label.visible = not condition_button.visible
+		if condition_button.visible:
 			condition_button.text = str(conditions[0].text) + "   •   Inspect ›"
 	else:
 		var view: Dictionary = ship.definition.view(current_system)
@@ -534,7 +534,7 @@ func _equipment_tone(id: String) -> Color:
 
 func _inspect_condition() -> void:
 	var conditions: Array = presenter.conditions()
-	if not conditions.is_empty():
+	if not conditions.is_empty() and not str(conditions[0].system).is_empty():
 		navigate(conditions[0].system, conditions[0].equipment)
 
 func _change_control(value: float, action: String) -> void:

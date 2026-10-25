@@ -55,7 +55,7 @@ func readings(id: String) -> Array[Array]:
 	var thermal: Array[Dictionary] = temperature_readings(id)
 	match runtime.kind:
 		"reactor":
-			result = [["Output", _kw(_number(id, "draw"))], ["Output limit", _kw(float(settings.get("limit", 0)))], ["Unused capacity", _kw(maxf(0, float(settings.get("limit", 0)) - _number(id, "draw")))], ["Core temperature", _temp(_number(id, "temperature"))], ["Heat generated", _kw(_number(id, "heat_generated"))]]
+			result = [["Output", _kw(_number(id, "draw"))], ["Output limit", _kw(_number(id, "capacity"))], ["Unused capacity", _kw(maxf(0, _number(id, "capacity") - _number(id, "draw")))], ["Core temperature", _temp(_number(id, "temperature"))], ["Heat generated", _kw(_number(id, "heat_generated"))]]
 		"bus":
 			result = [["Breaker", "CLOSED" if settings.get("closed", true) else "OPEN"], ["Total draw", _kw(_number(id, "draw"))], ["Local limit", _kw(float(settings.get("limit", runtime.config.get("rated_power", 0))))], ["Requested power", _kw(_number(id, "requested_power"))], ["Allocated supply", _kw(_number(id, "allocated_power"))]]
 		"pump":
@@ -101,7 +101,7 @@ func _operating_status(id: String) -> String:
 	var settings: Dictionary = runtime.settings
 	match runtime.kind:
 		"reactor":
-			if float(settings.get("limit", 0)) <= 0:
+			if _number(id, "capacity") <= 0:
 				return "Offline"
 			return "Limited" if _number(id, "requested_power") > _number(id, "allocated_power") + 0.1 else "Online"
 		"bus":
@@ -152,8 +152,17 @@ func equipment_reason(id: String) -> String:
 	var reason: String = str(ship.components[id].spec.description)
 	match status:
 		"Power limited", "Limited", "Brownout", "Unpowered":
-			var cause: String = _power_cause(id)
-			reason = "Available electrical supply limits output. Inspect " + _name(cause) + "."
+			var constraint: Dictionary = ship.components[id].power_constraint
+			var cause: String = str(constraint.get("component_id", id))
+			match constraint.get("kind", ""):
+				"connection":
+					reason = "Supply connection %s → %s is rated at %.1f kW and limits this equipment." % [_name(constraint.source_id), _name(cause), constraint.capacity]
+				"disconnected":
+					reason = _name(cause) + " has no connected power source."
+				"node":
+					reason = "Available electrical supply limits output. Inspect " + _name(cause) + "."
+				_:
+					reason = "Allocated electrical supply is below this equipment's demand."
 		"Cooling limited", "No circulation":
 			reason = "Circulation limits this equipment. Inspect " + _name(_cooling_cause(id)) + "."
 		"Isolated":
@@ -204,11 +213,11 @@ func system_summary(view_id: String) -> Dictionary:
 			"reactor":
 				if kind == "reactor":
 					total += _number(id, "draw")
-					requested += float(ship.components[id].settings.get("limit", 0))
+					requested += _number(id, "capacity")
 			"power":
 				if kind in ["reactor", "bus"] and not _has_member_power_upstream(id, members):
 					total += _number(id, "draw")
-					requested += float(ship.components[id].settings.get("limit", 0))
+					requested += _number(id, "capacity")
 			"thrust":
 				if kind == "engine":
 					engines += 1
@@ -248,11 +257,16 @@ func conditions() -> Array[Dictionary]:
 		if status in ["Online", "Idle", "Standby reference", "Reference", "Ramping"]:
 			continue
 		var cause: String = id
+		var constraint: Dictionary = {}
 		if status in ["Power limited", "Limited", "Unpowered", "Brownout"]:
-			cause = _power_cause(id)
+			constraint = ship.components[id].power_constraint
+			cause = str(constraint.get("component_id", id))
 		elif status in ["Cooling limited", "No circulation"]:
 			cause = _cooling_cause(id)
-		pending.append({"code": ship.components[id].kind + "." + status.to_lower().replace(" ", "_"), "text": _name(id) + ": " + status.to_lower() + ".", "cause_id": cause, "component_id": id})
+		var condition: Dictionary = {"code": ship.components[id].kind + "." + status.to_lower().replace(" ", "_"), "text": _name(id) + ": " + status.to_lower() + ".", "cause_id": cause, "component_id": id}
+		if constraint.has("connection_id"):
+			condition["connection_id"] = constraint.connection_id
+		pending.append(condition)
 	var result: Array[Dictionary] = []
 	for condition in pending:
 		var id: String = condition.component_id
@@ -262,9 +276,13 @@ func conditions() -> Array[Dictionary]:
 			for link in links(id):
 				target = link.equipment
 				break
-		var workspace: String = ship.definition.workspace_for(target)
+		var workspace: String = ship.definition.workspace_for(target) if _inspectable(target) else ""
 		if workspace.is_empty():
-			continue
+			target = ""
+			for view in ship.definition.views:
+				if id in view.get("members", []):
+					workspace = view.id
+					break
 		condition["system"] = workspace
 		condition["equipment"] = target
 		result.append(condition)
@@ -297,7 +315,7 @@ func caption(id: String) -> String:
 		return "UNAVAILABLE"
 	var settings: Dictionary = ship.components[id].settings
 	match ship.components[id].kind:
-		"reactor", "bus": return "%.0f / %.0f kW" % [_number(id, "draw"), float(settings.get("limit", 0))]
+		"reactor", "bus": return "%.0f / %.0f kW" % [_number(id, "draw"), _number(id, "capacity")]
 		"pump": return "%.1f / %.0f L/s" % [_number(id, "flow"), float(settings.get("flow", 0))]
 		"engine": return "%.1f / %.0f %% thrust" % [_number(id, "thrust"), float(settings.get("thrust", 0))]
 		"radiator": return "%.0f %%  •  %.0f kW" % [float(settings.get("deployment", 0)), _number(id, "heat_rejected")]
@@ -355,35 +373,12 @@ func _visible_neighbors(id: String, domain: String, outgoing: bool) -> Array[Str
 	return result
 
 
-func _power_cause(id: String) -> String:
-	var current: String = id
-	var visited: Dictionary = {}
-	while ship.components.has(current) and not visited.has(current):
-		visited[current] = true
-		var runtime = ship.components[current]
-		if runtime.kind == "bus" and not runtime.settings.get("closed", true):
-			return current
-		if runtime.kind in ["reactor", "bus"]:
-			var capacity: float = float(runtime.settings.get("limit", runtime.config.get("rated_power", INF)))
-			if _number(current, "requested_power") > capacity + 0.1 or capacity <= 0:
-				return current
-		var upstream: String = ""
-		for edge in connections:
-			if edge.domain == "power" and edge.to_component == current:
-				upstream = edge.from_component
-				break
-		if upstream.is_empty():
-			return current
-		current = upstream
-	return id
-
-
 func _cooling_cause(id: String) -> String:
 	for edge in connections:
 		if edge.domain == "coolant" and edge.to_component == id:
 			var pump_id: String = edge.from_component
 			if equipment_status(pump_id) == "Power limited":
-				return _power_cause(pump_id)
+				return str(ship.components[pump_id].power_constraint.get("component_id", pump_id))
 			return pump_id
 	return id
 

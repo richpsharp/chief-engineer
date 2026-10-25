@@ -70,6 +70,7 @@ These are simplified gameplay relationships, not a real electrical or thermal en
 - `tests/test_simulation.gd` checks the simulation rules.
 - `tests/test_interface.gd` exercises scene navigation and control connections.
 - `tests/test_architecture.gd` checks definition validation, runtime isolation, fixed-step behavior, and renamed/reordered copies of Kestrel.
+- `tests/test_control_validation.gd` checks authored operating ranges and safe zero settings. The test suites share detached ship fixtures from `tests/ship_fixtures.gd`.
 
 ### Components, ports, and assemblies
 
@@ -102,6 +103,7 @@ With Godot on your PATH:
 ```powershell
 godot --headless --path . --script tests/test_simulation.gd
 godot --headless --path . --script tests/test_architecture.gd
+godot --headless --path . --script tests/test_control_validation.gd
 godot --headless --path . --script tests/test_interface.gd
 godot --headless --path . --quit-after 3
 ```

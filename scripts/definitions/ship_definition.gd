@@ -253,6 +253,8 @@ func _validate_component(item: Resource, errors: Array[String]) -> void:
 				errors.append("Boolean control requires boolean setting: " + item.id)
 		elif not _number(initial) or not _number(control.get("min")) or not _number(control.get("max")) or float(control.min) > float(control.max) or float(initial) < float(control.min) or float(initial) > float(control.max):
 			errors.append("Invalid control range/setting: %s:%s" % [item.id, key])
+		elif key in ["limit", "flow", "thrust", "deployment"] and float(control.min) < 0.0:
+			errors.append("Operating control range must be non-negative: %s:%s" % [item.id, key])
 	for key in item.initial_settings:
 		if not control_ids.has(key):
 			errors.append("Unknown initial setting: %s:%s" % [item.id, key])

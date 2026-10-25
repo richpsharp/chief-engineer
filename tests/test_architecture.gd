@@ -3,7 +3,7 @@ extends SceneTree
 
 const Simulation = preload("res://scripts/ship_simulation.gd")
 const Presenter = preload("res://scripts/presentation/ship_presenter.gd")
-const Ship = preload("res://scripts/definitions/ship_definition.gd")
+const Fixtures = preload("res://tests/ship_fixtures.gd")
 const Connection = preload("res://scripts/definitions/connection_definition.gd")
 const Kestrel = preload("res://ships/kestrel.tres")
 var checks: int = 0
@@ -23,6 +23,10 @@ func _initialize() -> void:
 	_test_connected_temperature_readings()
 	_test_simultaneous_equipment_conditions()
 	_test_engine_limit_telemetry()
+	_test_power_constraint_diagnostics()
+	_test_nested_power_constraints()
+	_test_disconnected_service_conditions()
+	_test_equipment_without_controls()
 	_test_nested_bus_summary()
 	print("%s: %d architecture checks (%d failures)." % ["PASS" if failures == 0 else "FAIL", checks, failures])
 	quit(0 if failures == 0 else 1)
@@ -112,7 +116,7 @@ func _test_commands_and_fixed_steps() -> void:
 
 
 func _test_renamed_and_reordered_definition() -> void:
-	var transformed = _copy_kestrel()
+	var transformed = Fixtures.copy_kestrel()
 	var ids: Array[String] = []
 	for item in transformed.components + transformed.assemblies:
 		ids.append(item.id)
@@ -157,32 +161,32 @@ func _test_renamed_and_reordered_definition() -> void:
 
 
 func _test_invalid_definitions() -> void:
-	var invalid = _copy_kestrel()
+	var invalid = Fixtures.copy_kestrel()
 	invalid.components[0] = Resource.new()
 	_check(not invalid.validate().is_empty(), "An untyped Resource is rejected without invoking missing component properties.")
-	invalid = _copy_kestrel()
+	invalid = Fixtures.copy_kestrel()
 	invalid.component("reactor").definition = null
 	_check(not invalid.validate().is_empty(), "A component with no type definition is rejected safely.")
-	invalid = _copy_kestrel()
+	invalid = Fixtures.copy_kestrel()
 	invalid.component("reactor").initial_state.erase("temperature")
 	_check(not invalid.validate().is_empty(), "A heat-storing component requires an authored initial temperature.")
-	invalid = _copy_kestrel()
+	invalid = Fixtures.copy_kestrel()
 	invalid.component("reactor").parameters["heat_capacity"] = 0.0
 	_check(not invalid.validate().is_empty(), "A zero thermal capacity cannot enter the simulation.")
-	invalid = _copy_kestrel()
+	invalid = Fixtures.copy_kestrel()
 	invalid.view("power")["members"] = 17
 	_check(not invalid.validate().is_empty(), "Malformed view membership is rejected without crashing workspace lookup.")
-	invalid = _copy_kestrel()
+	invalid = Fixtures.copy_kestrel()
 	invalid.component("pump_b").definition.ports["backup_power_in"] = {"domain": "power", "direction": "in"}
 	var second_feed = _power_link("separate_power_port", "main_bus", "pump_b")
 	second_feed.to_port = "backup_power_in"
 	invalid.connections.append(second_feed)
 	_check(not invalid.validate().is_empty(), "A second named electrical input cannot bypass the single-feed component rule.")
-	invalid = _copy_kestrel()
+	invalid = Fixtures.copy_kestrel()
 	invalid.component("pump_b").definition.controls[0]["id"] = "unsupported_speed"
 	invalid.component("pump_b").initial_settings = {"unsupported_speed": 30.0}
 	_check(not invalid.validate().is_empty(), "An authored control must correspond to behavior supported by the component kind.")
-	invalid = _copy_kestrel()
+	invalid = Fixtures.copy_kestrel()
 	for control in invalid.component("aux_bus").definition.controls:
 		if control.id == "closed":
 			control["kind"] = "number"
@@ -191,16 +195,16 @@ func _test_invalid_definitions() -> void:
 			control["default"] = 1.0
 	invalid.component("aux_bus").initial_settings["closed"] = 1.0
 	_check(not invalid.validate().is_empty(), "A breaker cannot redefine its Boolean setting as a numeric control.")
-	invalid = _copy_kestrel()
+	invalid = Fixtures.copy_kestrel()
 	invalid.component("pump_b").definition.controls[0]["kind"] = "toggle"
 	invalid.component("pump_b").definition.controls[0]["default"] = true
 	invalid.component("pump_b").initial_settings["flow"] = true
 	_check(not invalid.validate().is_empty(), "A pump cannot redefine its numeric flow setting as a toggle.")
 	for bad_capacity in [-2.0, NAN]:
-		invalid = _copy_kestrel()
+		invalid = Fixtures.copy_kestrel()
 		invalid.connections[0].capacity = bad_capacity
 		_check(not invalid.validate().is_empty(), "Invalid negative and nonfinite wire ratings are rejected.")
-	invalid = _copy_kestrel()
+	invalid = Fixtures.copy_kestrel()
 	for edge in invalid.resolved_connections():
 		if edge.domain == "thermal" and edge.from_component == "main_engine":
 			var alias_duplicate = Connection.new()
@@ -212,35 +216,35 @@ func _test_invalid_definitions() -> void:
 			invalid.connections.append(alias_duplicate)
 			break
 	_check(not invalid.validate().is_empty(), "A leaf edge cannot duplicate heat already connected through an assembly alias.")
-	invalid = _copy_kestrel()
+	invalid = Fixtures.copy_kestrel()
 	invalid.components.append(invalid.components[0].duplicate(true))
 	_check(not invalid.validate().is_empty(), "Duplicate component IDs are rejected.")
-	invalid = _copy_kestrel()
+	invalid = Fixtures.copy_kestrel()
 	invalid.connections[0].to_component = "not_installed"
 	_check(not invalid.validate().is_empty(), "Missing connection endpoints are rejected.")
-	invalid = _copy_kestrel()
+	invalid = Fixtures.copy_kestrel()
 	invalid.connections[0].from_port = "missing_port"
 	_check(not invalid.validate().is_empty(), "Missing ports are rejected.")
-	invalid = _copy_kestrel()
+	invalid = Fixtures.copy_kestrel()
 	invalid.connections[0].to_component = "coolant_reservoir"
 	invalid.connections[0].to_port = "heat_in"
 	_check(not invalid.validate().is_empty(), "Power cannot connect to a thermal port.")
-	invalid = _copy_kestrel()
+	invalid = Fixtures.copy_kestrel()
 	invalid.connections[0].to_component = "main_bus"
 	invalid.connections[0].to_port = "power_out"
 	_check(not invalid.validate().is_empty(), "Output-to-output connections are rejected.")
-	invalid = _copy_kestrel()
+	invalid = Fixtures.copy_kestrel()
 	var duplicate = invalid.connections[0].duplicate(true)
 	duplicate.id = "extra_source"
 	invalid.connections.append(duplicate)
 	_check(not invalid.validate().is_empty(), "Consumers cannot have multiple electrical sources.")
-	invalid = _copy_kestrel()
+	invalid = Fixtures.copy_kestrel()
 	invalid.assembly("drive_unit").ports["power_in"] = {"component": "propulsion", "port": "power_in"}
 	_check(invalid.resolve_port("propulsion", "power_in").is_empty() and not invalid.validate().is_empty(), "Cyclic assembly aliases terminate safely and are rejected.")
-	invalid = _copy_kestrel()
+	invalid = Fixtures.copy_kestrel()
 	invalid.assembly("propulsion").parent_id = "drive_unit"
 	_check(not invalid.validate().is_empty(), "Assembly containment cycles are rejected.")
-	invalid = _copy_kestrel()
+	invalid = Fixtures.copy_kestrel()
 	_remove_power_input(invalid, "main_bus")
 	_remove_power_input(invalid, "aux_bus")
 	invalid.connections.append(_power_link("cycle_ab", "main_bus", "aux_bus"))
@@ -254,7 +258,7 @@ func _test_invalid_definitions() -> void:
 
 
 func _test_connection_capacity_and_accounting() -> void:
-	var limited = _copy_kestrel()
+	var limited = Fixtures.copy_kestrel()
 	for edge in limited.resolved_connections():
 		if edge.to_component == "pump_b" and edge.domain == "power":
 			for authored in limited.connections:
@@ -275,25 +279,8 @@ func _test_connection_capacity_and_accounting() -> void:
 			"Total delivered consumer power equals source output within its rating.")
 
 
-func _copy_kestrel():
-	var copied = Ship.new()
-	copied.id = Kestrel.id
-	copied.display_name = Kestrel.display_name
-	copied.schema_version = Kestrel.schema_version
-	copied.ambient_temperature = Kestrel.ambient_temperature
-	for item in Kestrel.components:
-		var spec = item.duplicate(true)
-		spec.definition = item.definition.duplicate(true)
-		copied.components.append(spec)
-	for item in Kestrel.assemblies: copied.assemblies.append(item.duplicate(true))
-	for item in Kestrel.connections: copied.connections.append(item.duplicate(true))
-	copied.views = Kestrel.views.duplicate(true)
-	copied.layouts = Kestrel.layouts.duplicate(true)
-	return copied
-
-
 func _test_thermal_energy_accounting() -> void:
-	var hotter = _copy_kestrel()
+	var hotter = Fixtures.copy_kestrel()
 	hotter.component("reactor").initial_state["temperature"] = 60.0
 	var ship = Simulation.new(hotter)
 	for deployment in [100.0, 0.0]:
@@ -318,7 +305,7 @@ func _test_continuous_temperature_readings() -> void:
 	_check(_near(reading.margin, 28.0), "Advisory headroom remains a numerical temperature difference.")
 	_check(presenter.temperature_readings("pump_a").is_empty() and presenter.temperature_readings("missing").is_empty(),
 		"Equipment without a thermal measurement does not invent a zero temperature.")
-	var extra_state = _copy_kestrel()
+	var extra_state = Fixtures.copy_kestrel()
 	extra_state.component("pump_a").initial_state["temperature"] = 20.0
 	_check(Presenter.new(Simulation.new(extra_state)).temperature_readings("pump_a").is_empty(),
 		"An unused authored state field cannot masquerade as committed thermal telemetry.")
@@ -333,7 +320,7 @@ func _test_continuous_temperature_readings() -> void:
 	presenter.conditions()
 	_check(ship.snapshot() == before, "Reading and modifying returned telemetry cannot change physical state.")
 
-	var hot = _copy_kestrel()
+	var hot = Fixtures.copy_kestrel()
 	hot.component("reactor").initial_state["temperature"] = 80.0
 	ship = Simulation.new(hot)
 	presenter = Presenter.new(ship)
@@ -351,7 +338,7 @@ func _test_continuous_temperature_readings() -> void:
 
 
 func _test_temperature_advisory_policy() -> void:
-	var advisory = _copy_kestrel()
+	var advisory = Fixtures.copy_kestrel()
 	advisory.component("reactor").parameters["warning_temperature"] = 40.0
 	var left = Simulation.new(advisory)
 	var right = Simulation.new(Kestrel)
@@ -375,7 +362,7 @@ func _test_temperature_advisory_policy() -> void:
 
 
 func _test_connected_temperature_readings() -> void:
-	var definition = _copy_kestrel()
+	var definition = Fixtures.copy_kestrel()
 	definition.component("reactor").initial_state["temperature"] = -20.0
 	definition.component("main_engine").initial_state["temperature"] = -30.0
 	definition.component("coolant_reservoir").initial_state["temperature"] = -40.0
@@ -404,7 +391,7 @@ func _test_connected_temperature_readings() -> void:
 
 
 func _test_simultaneous_equipment_conditions() -> void:
-	var definition = _copy_kestrel()
+	var definition = Fixtures.copy_kestrel()
 	definition.component("coolant_reservoir").initial_state["temperature"] = 65.0
 	definition.component("radiator").initial_settings["deployment"] = 0.0
 	var presenter = Presenter.new(Simulation.new(definition))
@@ -424,7 +411,7 @@ func _test_simultaneous_equipment_conditions() -> void:
 
 
 func _test_engine_limit_telemetry() -> void:
-	var definition = _copy_kestrel()
+	var definition = Fixtures.copy_kestrel()
 	definition.component("main_engine").parameters["flow_per_thrust"] = 2.0
 	definition.component("main_engine").parameters["kw_per_thrust"] = 3.0
 	var ship = Simulation.new(definition)
@@ -441,6 +428,115 @@ func _test_engine_limit_telemetry() -> void:
 	_check(presenter.equipment_status("main_engine") == "Cooling limited", "Restored electrical supply leaves the independent cooling restriction visible.")
 
 
+func _test_power_constraint_diagnostics() -> void:
+	var definition = Fixtures.copy_kestrel()
+	for edge in definition.connections:
+		if edge.id == "feed_propulsion_pump": edge.capacity = 6.0
+	var ship = Simulation.new(definition)
+	var presenter = Presenter.new(ship)
+	var condition: Dictionary = _condition_for(presenter, "pump_b")
+	_check(_near(ship.components["pump_b"].state.power, 6.0) and presenter.equipment_status("reactor") == "Online",
+		"A limited pump feed leaves the healthy reactor online.")
+	_check(condition.get("connection_id") == "feed_propulsion_pump" and condition.equipment == "pump_b",
+		"A wire-limited pump condition identifies the connection and opens its receiving equipment.")
+	_check(presenter.equipment_reason("pump_b").contains("6.0 kW") and not presenter.equipment_reason("pump_b").contains("Inspect Reactor"),
+		"The explanation names the wire rating instead of blaming a healthy reactor.")
+	ship.command("aux_bus", "limit", 20.0)
+	ship.tick(0.1)
+	_check(_condition_for(presenter, "pump_b").cause_id == "aux_bus", "A tighter bus constraint supersedes the cable rating.")
+	ship.command("aux_bus", "limit", 40.0)
+	ship.tick(0.1)
+	_check(_condition_for(presenter, "pump_b").get("connection_id") == "feed_propulsion_pump", "Restoring the bus reveals the remaining cable constraint.")
+	ship.command("pump_b", "flow", 10.0)
+	ship.tick(10.0)
+	_check(_condition_for(presenter, "pump_b").is_empty() and ship.components["pump_b"].power_constraint.is_empty(), "Reducing demand below the cable rating clears the old power condition and evidence.")
+
+	definition = Fixtures.copy_kestrel()
+	for edge in definition.connections:
+		if edge.id == "source_aux": edge.capacity = 24.0
+	ship = Simulation.new(definition)
+	presenter = Presenter.new(ship)
+	condition = _condition_for(presenter, "aux_bus")
+	_check(condition.get("connection_id") == "source_aux" and condition.equipment == "aux_bus",
+		"A bus input wire limitation routes to the receiving bus.")
+	ship.command("reactor", "limit", 70.0)
+	ship.tick(0.1)
+	_check(_condition_for(presenter, "pump_b").cause_id == "reactor", "A source shortage retains the actual reactor constraint.")
+	ship.command("reactor", "limit", 200.0)
+	ship.command("pump_b", "flow", 10.0)
+	ship.tick(10.0)
+	_check(_condition_for(presenter, "aux_bus").is_empty() and ship.components["aux_bus"].power_constraint.is_empty(), "Recovered bus allocation clears propagated diagnostics.")
+
+	definition = Fixtures.copy_kestrel()
+	definition.component("main_engine").parameters["priority"] = 0
+	definition.component("reactor").initial_settings["limit"] = 70.0
+	ship = Simulation.new(definition)
+	_check(_near(ship.components["main_engine"].state.requested_power, 0.0) and ship.components["main_engine"].power_constraint.is_empty(),
+		"A later loss of pump flow clears the engine's obsolete electrical constraint when cooling removes its power demand.")
+
+
+func _test_nested_power_constraints() -> void:
+	var definition = Fixtures.copy_kestrel()
+	for edge in definition.connections:
+		if edge.id == "source_aux":
+			edge.from_component = "main_bus"
+			edge.from_port = "power_out"
+	definition.component("main_bus").initial_settings["limit"] = 50.0
+	definition.component("aux_bus").initial_settings["limit"] = 10.0
+	definition.component("life_support").parameters["priority"] = 60
+	var ship = Simulation.new(definition)
+	_check(ship.components["aux_bus"].power_constraint.get("component_id") == "aux_bus"
+		and ship.components["main_bus"].power_constraint.get("component_id") == "main_bus",
+		"An early child-bus shortage cannot overwrite the parent bus's separate supply constraint.")
+	_check(ship.components["reactor"].power_constraint.is_empty() and Presenter.new(ship).equipment_status("reactor") == "Online",
+		"Downstream restrictions do not create a false source diagnostic.")
+
+
+func _test_disconnected_service_conditions() -> void:
+	var definition = Fixtures.copy_kestrel()
+	_remove_power_input(definition, "life_support")
+	var ship = Simulation.new(definition)
+	var presenter = Presenter.new(ship)
+	var condition: Dictionary = _condition_for(presenter, "life_support")
+	_check(definition.validate().is_empty() and presenter.equipment_status("life_support") == "Unpowered", "Disconnected service loads are supported and report their actual power state.")
+	_check(not condition.is_empty(), "A missing inspector route never discards an unpowered service warning.")
+	_check(condition.get("system") == "life_support" and condition.get("equipment") == "", "A disconnected hidden service routes to its department summary.")
+	_check(presenter.equipment_reason("life_support").contains("no connected power source"), "Disconnected equipment explains its missing source rather than a capacity shortage.")
+	for view in definition.views:
+		view.members.erase("life_support")
+	presenter = Presenter.new(Simulation.new(definition))
+	condition = _condition_for(presenter, "life_support")
+	_check(not condition.is_empty() and condition.get("system") == "", "A service without any authored view retains an unrouted ship-wide condition.")
+
+
+func _test_equipment_without_controls() -> void:
+	var definition = Fixtures.copy_kestrel()
+	for id in ["reactor", "aux_bus"]:
+		definition.component(id).definition.controls.clear()
+		definition.component(id).initial_settings.clear()
+	var ship = Simulation.new(definition)
+	var presenter = Presenter.new(ship)
+	_check(definition.validate().is_empty() and ship.components["reactor"].settings.is_empty(), "Fixed-capacity equipment does not require player controls.")
+	_check(_near(ship.totals().output, 152.0) and presenter.equipment_status("reactor") == "Online" and presenter.conditions().is_empty(),
+		"A fixed-capacity reactor supplies the ship without a contradictory offline warning.")
+	_check(presenter.readings("reactor")[1][1] == "200.0 kW" and presenter.readings("reactor")[2][1] == "48.0 kW",
+		"A fixed reactor inspector reports committed capacity and spare power.")
+	_check(presenter.caption("reactor") == "152 / 200 kW" and presenter.caption("aux_bus") == "30 / 60 kW",
+		"Reactor and bus captions consistently display fixed capacity.")
+	_check(presenter.system_summary("reactor").value == "152 / 200 kW", "The reactor summary uses the same fixed capacity as the solver.")
+	_check(not ship.command("reactor", "limit", 100.0).accepted, "Fixed equipment does not gain an unauthored operating control.")
+	definition.component("reactor").parameters["rated_power"] = 0.0
+	presenter = Presenter.new(Simulation.new(definition))
+	_check(presenter.equipment_status("reactor") == "Offline", "Zero fixed capacity is correctly reported as offline.")
+
+
+func _condition_for(presenter, id: String) -> Dictionary:
+	for condition in presenter.conditions():
+		if condition.component_id == id and not condition.has("measurement"):
+			return condition
+	return {}
+
+
 func _thermal_energy(ship) -> float:
 	var energy := 0.0
 	for runtime in ship.components.values():
@@ -450,7 +546,7 @@ func _thermal_energy(ship) -> float:
 
 
 func _test_nested_bus_summary() -> void:
-	var nested = _copy_kestrel()
+	var nested = Fixtures.copy_kestrel()
 	for edge in nested.resolved_connections():
 		if edge.domain == "power" and edge.to_component == "aux_bus":
 			for link in nested.connections:

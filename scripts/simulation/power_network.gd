@@ -44,6 +44,7 @@ func solve(delta: float) -> void:
 	_remaining.clear()
 	for id in _ids:
 		var part = _components[id]
+		part.power_constraint = {}
 		for key in ["power", "allocated_power", "requested_power", "draw"]:
 			part.state[key] = 0.0
 		if part.kind in ["reactor", "bus"]:
@@ -87,6 +88,8 @@ func solve(delta: float) -> void:
 			part.state["thrust"] = minf(float(part.state["thrust"]), limit)
 			part.state["requested_power"] = _request(part, id)
 			part.state["allocated_power"] = minf(float(part.state["allocated_power"]), float(part.state["requested_power"]))
+			if float(part.state["allocated_power"]) >= float(part.state["requested_power"]):
+				part.power_constraint = {}
 			part.state["power"] = float(part.state["thrust"]) * float(part.config.get("kw_per_thrust", 2.4))
 	for id in _loads:
 		var part = _components[id]
@@ -95,9 +98,17 @@ func solve(delta: float) -> void:
 			upstream.state["draw"] += float(part.state["power"])
 			upstream.state["power"] += float(part.state["power"])
 			upstream.state["allocated_power"] += float(part.state["allocated_power"])
+			if upstream.power_constraint.is_empty() and not part.power_constraint.is_empty():
+				var cause: String = part.power_constraint.component_id
+				# A child's local restriction is not a fault in its parent's
+				# supply. Propagate only constraints on the ancestor's own path.
+				if cause == ancestor or cause in _paths[ancestor]:
+					upstream.power_constraint = part.power_constraint.duplicate(true)
 	for id in _ids:
 		if _components[id].kind in ["reactor", "bus"]:
 			_components[id].state["requested_power"] = _downstream_request(String(id))
+			if float(_components[id].state["allocated_power"]) >= float(_components[id].state["requested_power"]):
+				_components[id].power_constraint = {}
 	_coolant.refresh()
 
 
@@ -143,6 +154,9 @@ func _cooling_thrust(part, id: String) -> float:
 
 func _allocate(id: String, request: float) -> float:
 	if source_for(id).is_empty():
+		if request > 0.0:
+			var path: Array = _paths[id]
+			_components[id].power_constraint = {"kind": "disconnected", "component_id": id if path.is_empty() else path.back()}
 		return 0.0
 	var keys: Array[String] = []
 	for ancestor in _paths[id]:
@@ -154,8 +168,22 @@ func _allocate(id: String, request: float) -> float:
 			keys.append("edge:" + String(edge["id"]))
 		cursor = String(edge["from_component"])
 	var grant: float = request
+	var limiting_key: String = ""
 	for key in keys:
-		grant = minf(grant, float(_remaining.get(key, 0.0)))
+		var available: float = float(_remaining[key])
+		if available < grant:
+			grant = available
+			limiting_key = key
+	if not limiting_key.is_empty():
+		if limiting_key.begins_with("node:"):
+			_components[id].power_constraint = {"kind": "node", "component_id": limiting_key.trim_prefix("node:")}
+		else:
+			var connection_id: String = limiting_key.trim_prefix("edge:")
+			for edge in _incoming.values():
+				if edge.id == connection_id:
+					_components[id].power_constraint = {"kind": "connection", "component_id": edge.to_component,
+						"source_id": edge.from_component, "connection_id": connection_id, "capacity": edge.capacity}
+					break
 	for key in keys:
 		_remaining[key] = maxf(0.0, float(_remaining[key]) - grant)
 	return grant

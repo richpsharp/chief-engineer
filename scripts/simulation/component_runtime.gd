@@ -6,6 +6,8 @@ var kind: String
 var config: Dictionary = {}
 var settings: Dictionary = {}
 var state: Dictionary = {}
+## Derived allocation evidence, refreshed each solve; not saved operating state.
+var power_constraint: Dictionary = {}
 
 
 func _init(component_spec, ambient_temperature: float = 10.0) -> void:

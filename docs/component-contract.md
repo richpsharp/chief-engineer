@@ -34,6 +34,8 @@ This document describes the shared interfaces for the component refactor.
 
 Each component runtime has `spec`, `kind: String`, `config: Dictionary`, `settings: Dictionary`, `state: Dictionary`. Common state `power`, `allocated_power`, `requested_power`; source/bus `draw`; pump `flow`, `target_flow`; engine `thrust`, `target_thrust`, `cooling_limit` (maximum thrust supported by committed circulation); exchanger `heat_transfer`; radiator `heat_rejected`; heat producers `heat_generated`. Thermal masses (reactor, engine, coolant) publish `temperature` (°C), `temperature_rate` (°C/s), and `net_heat` (kW, positive adds stored heat). These are refreshed at committed temperatures, including initialization. Missing optional power/flow readings display zero; missing temperature measurements remain absent.
 
+Runtime `power_constraint: Dictionary` is derived diagnostic evidence, rebuilt each solve rather than saved as operating state. It is empty when electrical demand is satisfied. Otherwise `kind` is `node`, `connection`, or `disconnected`, and `component_id` identifies the limiting node, receiving endpoint, or unfed endpoint. Connection constraints also contain `connection_id`, `source_id`, and `capacity` (kW). The allocator records the actual limiting constraint before reserving capacity; the presenter does not infer it from unrelated upstream equipment. A bus inherits only constraints on its own supply path, not restrictions in its downstream consumers.
+
 Methods `tick(delta)`, `reset()`, `toggle_pause()`, `command(target_id, action, value) -> Dictionary` with `{accepted, reason, sequence}`; action matches control ID, toggle callers supply desired boolean. Invalid/paused commands rejected, valid commands queued and applied on next fixed step. `snapshot() -> Dictionary` returns a detached state/settings map for testing/saves. `totals() -> Dictionary` with `output`, `capacity`, `spare`, `heat_generated`, `heat_rejected`. Runtime owns physical calculations, command validation, committed readings, and the human-readable command history. Equipment IDs come from definitions; panel formatting lives in the presenter.
 
 ## Presentation API
@@ -44,6 +46,8 @@ Methods `tick(delta)`, `reset()`, `toggle_pause()`, `command(target_id, action, 
 
 Operating conditions and thermal advisories are independent. A closed radiator with hot coolant reports both facts; an offline reactor can still hold heat. The equipment status gives operating restrictions precedence, while its explanation also includes connected temperature advisories. `conditions()` retains every applicable condition regardless of the single status label. Engine supply and cooling status use the simulation's published `requested_power`, `allocated_power`, and `cooling_limit`; the presenter does not repeat the physical conversion formulas.
 
+Conditions with no inspectable equipment route to a view containing the affected component, with `equipment` empty. If no authored view contains it, both `system` and `equipment` are empty: the warning still counts and displays without an inspect button. A connection-limited condition includes `connection_id` and routes to the receiving equipment when possible.
+
 Views: `{id,name,kind,summary_kind,description,detail,members}`. Kind workspace or summary. Summary kinds power/temperature/thrust/load/reactor. Members are leaf IDs for aggregation/navigation; departments may overlap. Layouts keyed by view ID: `{nodes: Dictionary}` maps leaf IDs to `Rect2`. Schematic edges derive from connections and the visible endpoints (no duplicated wiring lists). Thermal-only hidden coolant reservoir may be omitted from initial schematic.
 
 Views may supply `nav_name` as a shorter sidebar label. Power summaries count network boundaries once even with nested member buses; multi-engine summaries report mean thrust. The heat strip reports active radiator rejection; passive thermal losses account for the remaining equilibrium heat loss.
@@ -53,6 +57,8 @@ Snapshots include schema version, definition ID, step count, fractional time acc
 Tests migrate to addressed component state/commands; no legacy named A/B getters. Only Kestrel is shipped in this issue. Mutated copies of its definition are permitted as test fixtures, not a second playable ship.
 
 Control descriptors may specify `max_parameter` (e.g. `rated_power`, `max_flow`). Use `spec.controls()` for effective descriptors resolved against instance parameters, rather than accessing the type's raw list. Kestrel models six separate service loads and one hidden `coolant_reservoir`; main and auxiliary buses both expose capacity and breaker controls.
+
+Operating ranges for `limit`, `flow`, `thrust`, and `deployment` must have nonnegative minima; negative Celsius temperatures remain valid. Reactor and bus controls may be omitted for fixed-capacity equipment, in which case capacity defaults to `rated_power` and an uncontrolled bus breaker defaults closed. Source status, summaries, and capacity captions read the solver's committed `capacity`, including when no limit control exists. An omitted control cannot receive commands.
 
 ## Extension boundary
 

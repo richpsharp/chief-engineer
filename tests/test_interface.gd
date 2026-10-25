@@ -3,6 +3,7 @@ extends SceneTree
 ## the real scene controls. Add -- --capture to a graphical run for screenshots.
 
 const MainScene = preload("res://scenes/main.tscn")
+const Fixtures = preload("res://tests/ship_fixtures.gd")
 const CAPTURE_DIR = "res://.tools/captures"
 var console
 var checks: int = 0
@@ -136,6 +137,7 @@ func _run() -> void:
 	_check("radiator.closed" in simultaneous_codes and "coolant.temperature_advisory" in simultaneous_codes,
 		"The overview retains both the closed radiator and its thermal consequences.")
 	await _capture("radiator-advisory.png")
+	await _test_configuration_diagnostics()
 	var invalid_definition = console.ship.definition.duplicate(true)
 	invalid_definition.schema_version = -1
 	var invalid_console = MainScene.instantiate()
@@ -150,6 +152,47 @@ func _run() -> void:
 	print("%s: %d interface checks%s." % ["PASS" if failures == 0 else "FAIL", checks,
 		"" if failures == 0 else " (%d failures)" % failures])
 	quit(0 if failures == 0 else 1)
+
+
+func _test_configuration_diagnostics() -> void:
+	var definition = Fixtures.copy_kestrel()
+	for i in range(definition.connections.size() - 1, -1, -1):
+		if definition.connections[i].id == "feed_life_support":
+			definition.connections.remove_at(i)
+	for id in ["reactor", "aux_bus"]:
+		definition.component(id).definition.controls.clear()
+		definition.component(id).initial_settings.clear()
+	console.hide()
+	var original_console = console
+	console = MainScene.instantiate()
+	console.ship = console.Simulation.new(definition)
+	console.presenter = console.Presenter.new(console.ship)
+	root.add_child(console)
+	console.set_process(false)
+	await process_frame
+	_check(console.ship_status.text == "1 condition to inspect" and console.condition_button.visible,
+		"A disconnected service remains visible in the ship-wide condition display.")
+	_press(console.condition_button)
+	_check(console.current_system == "life_support" and console.selected_equipment == "" and console.summary_state.text == "Unpowered",
+		"The disconnected service condition opens its summary without an equipment inspector.")
+	await _capture("disconnected-service.png")
+	console.navigate("power", "reactor")
+	_check(console.inspector_condition.text == "Online" and console.control_widgets.is_empty()
+		and console.reading_rows[1].value.text == "200.0 kW",
+		"A fixed-capacity reactor inspector is online and exposes no unauthored controls.")
+	await _capture("fixed-reactor.png")
+	for view in definition.views:
+		view.members.erase("life_support")
+	console.ship.reset()
+	console.presenter = console.Presenter.new(console.ship)
+	console.navigate("overview")
+	_check(console.ship_status.text == "1 condition to inspect" and console.conditions_label.visible
+		and console.conditions_label.text.contains("unpowered") and not console.condition_button.visible,
+		"A condition with no authored destination stays visible without a broken navigation button.")
+	console.queue_free()
+	console = original_console
+	console.show()
+	await process_frame
 
 
 func _check_condition_route(component: String, control: String, value: float) -> void:
