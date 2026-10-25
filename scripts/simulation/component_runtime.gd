@@ -2,6 +2,7 @@ extends RefCounted
 
 ## Mutable state for one installed component. Authored Resources stay untouched.
 var spec
+var kind: String
 var config: Dictionary = {}
 var settings: Dictionary = {}
 var state: Dictionary = {}
@@ -9,6 +10,7 @@ var state: Dictionary = {}
 
 func _init(component_spec, ambient_temperature: float = 10.0) -> void:
 	spec = component_spec
+	kind = String(spec.definition.kind)
 	config = spec.config().duplicate(true)
 	for control in spec.controls():
 		settings[String(control["id"])] = control.get("default")
@@ -17,19 +19,15 @@ func _init(component_spec, ambient_temperature: float = 10.0) -> void:
 	for key in ["power", "allocated_power", "requested_power", "draw", "heat_generated", "heat_rejected", "heat_transfer", "coolant_flow"]:
 		if not state.has(key):
 			state[key] = 0.0
-	match kind():
+	match kind:
 		"pump":
 			state["flow"] = float(state.get("flow", 0.0))
 			state["target_flow"] = 0.0
 		"engine":
 			state["thrust"] = float(state.get("thrust", 0.0))
 			state["target_thrust"] = 0.0
-	if kind() in ["reactor", "engine", "coolant"] and not state.has("temperature"):
+	if kind in ["reactor", "engine", "coolant"] and not state.has("temperature"):
 		state["temperature"] = ambient_temperature
-
-
-func kind() -> String:
-	return String(spec.definition.kind)
 
 
 func control(action: String) -> Dictionary:

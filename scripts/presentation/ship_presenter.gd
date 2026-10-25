@@ -12,6 +12,39 @@ func _init(simulation) -> void:
 		connections = ship.definition.resolved_connections()
 
 
+func temperature_readings(id: String) -> Array[Dictionary]:
+	## A thermal mass reports itself; transfer equipment reports the connected
+	## masses it exchanges heat with. Missing measurements stay absent.
+	var result: Array[Dictionary] = []
+	if not ship.components.has(id):
+		return result
+	var thermal_fields: Array[String] = ["temperature", "temperature_rate", "net_heat"]
+	var observed: Array[String] = []
+	if ship.components[id].state.has_all(thermal_fields):
+		observed.append(id)
+	else:
+		for edge in connections:
+			if edge.domain != "thermal":
+				continue
+			var neighbor: String = ""
+			if edge.from_component == id:
+				neighbor = edge.to_component
+			elif edge.to_component == id:
+				neighbor = edge.from_component
+			if ship.components.has(neighbor) and ship.components[neighbor].state.has_all(thermal_fields) and neighbor not in observed:
+				observed.append(neighbor)
+	observed.sort()
+	for component_id in observed:
+		var component = ship.components[component_id]
+		var reading: Dictionary = {"component_id": component_id, "temperature": float(component.state.temperature),
+			"rate": float(component.state.temperature_rate), "net_heat": float(component.state.net_heat)}
+		if component.config.has("warning_temperature"):
+			reading["advisory_temperature"] = float(component.config.warning_temperature)
+			reading["margin"] = reading.advisory_temperature - reading.temperature
+		result.append(reading)
+	return result
+
+
 func readings(id: String) -> Array[Array]:
 	if not ship.components.has(id):
 		return []
@@ -19,7 +52,8 @@ func readings(id: String) -> Array[Array]:
 	var state: Dictionary = runtime.state
 	var settings: Dictionary = runtime.settings
 	var result: Array[Array] = []
-	match _kind(id):
+	var thermal: Array[Dictionary] = temperature_readings(id)
+	match runtime.kind:
 		"reactor":
 			result = [["Output", _kw(_number(id, "draw"))], ["Output limit", _kw(float(settings.get("limit", 0)))], ["Unused capacity", _kw(maxf(0, float(settings.get("limit", 0)) - _number(id, "draw")))], ["Core temperature", _temp(_number(id, "temperature"))], ["Heat generated", _kw(_number(id, "heat_generated"))]]
 		"bus":
@@ -27,11 +61,11 @@ func readings(id: String) -> Array[Array]:
 		"pump":
 			result = [["Flow request", _flow(float(settings.get("flow", 0)))], ["Actual flow", _flow(_number(id, "flow"))], ["Power draw", _kw(_number(id, "power"))], ["Available flow", _flow(_number(id, "target_flow"))], ["Electrical supply", _source_names(id, "power")]]
 		"engine":
-			result = [["Thrust request", _percent(float(settings.get("thrust", 0)))], ["Actual thrust", _percent(_number(id, "thrust"))], ["Power draw", _kw(_number(id, "power"))], ["Allocated power", _kw(_number(id, "allocated_power"))], ["Cooling flow", _flow(_incoming_flow(id))], ["Temperature", _temp(_number(id, "temperature"))]]
+			result = [["Thrust request", _percent(float(settings.get("thrust", 0)))], ["Actual thrust", _percent(_number(id, "thrust"))], ["Power draw", _kw(_number(id, "power"))], ["Allocated power", _kw(_number(id, "allocated_power"))], ["Cooling flow", _flow(_number(id, "coolant_flow"))], ["Temperature", _temp(_number(id, "temperature"))]]
 		"heat_exchanger":
-			result = [["Heat transfer", _kw(_number(id, "heat_transfer"))], ["Circulation", _flow(_incoming_flow(id))], ["Heat source", _source_names(id, "thermal")], ["Flow source", _source_names(id, "coolant")]]
+			result = [["Heat transfer", _kw(_number(id, "heat_transfer"))], ["Circulation", _flow(_number(id, "coolant_flow"))], ["Heat source", _source_names(id, "thermal")], ["Flow source", _source_names(id, "coolant")]]
 		"radiator":
-			result = [["Deployment", _percent(float(settings.get("deployment", 0)))], ["Heat rejected", _kw(_number(id, "heat_rejected"))], ["Circulation", _flow(_incoming_flow(id))], ["Coolant", _temp(_incoming_temperature(id))], ["Ambient reference", _temp(ship.definition.ambient_temperature)]]
+			result = [["Deployment", _percent(float(settings.get("deployment", 0)))], ["Heat rejected", _kw(_number(id, "heat_rejected"))], ["Circulation", _flow(_number(id, "coolant_flow"))], ["Coolant", _temp(thermal[0].temperature) if not thermal.is_empty() else "No connection"], ["Ambient reference", _temp(ship.definition.ambient_temperature)]]
 		"coolant":
 			result = [["Temperature", _temp(_number(id, "temperature"))]]
 		"load":
@@ -42,6 +76,12 @@ func readings(id: String) -> Array[Array]:
 			for key in state:
 				if state[key] is float or state[key] is int:
 					result.append([str(key).capitalize(), "%.1f" % float(state[key])])
+	for reading in thermal:
+		var label: String = "Temperature trend" if thermal.size() == 1 else _name(reading.component_id)
+		var value: String = "%.2f °C/min" % (reading.rate * 60.0)
+		if thermal.size() > 1:
+			value = _temp(reading.temperature) + " / " + value
+		result.append([label, value])
 	return result
 
 
@@ -50,12 +90,15 @@ func equipment_status(id: String) -> String:
 		return "Unavailable"
 	var runtime = ship.components[id]
 	var settings: Dictionary = runtime.settings
-	match _kind(id):
+	# Advisories are a presentation policy over numerical readings. They do
+	# not change equipment dynamics or collapse the thermal model to a flag.
+	for reading in temperature_readings(id):
+		if reading.has("margin") and reading.margin < 0.0:
+			return "Temperature advisory"
+	match runtime.kind:
 		"reactor":
 			if float(settings.get("limit", 0)) <= 0:
 				return "Offline"
-			if _hot(id):
-				return "Hot"
 			return "Limited" if _number(id, "requested_power") > _number(id, "allocated_power") + 0.1 else "Online"
 		"bus":
 			if not settings.get("closed", true):
@@ -70,11 +113,9 @@ func equipment_status(id: String) -> String:
 			return "Ramping" if _number(id, "flow") < request - 0.1 else "Online"
 		"engine":
 			var request: float = float(settings.get("thrust", 0))
-			if _hot(id):
-				return "Hot"
 			if request <= 0:
 				return "Idle"
-			var cooling_limit: float = _incoming_flow(id) / maxf(0.0001, float(runtime.config.get("flow_per_thrust", 1)))
+			var cooling_limit: float = _number(id, "coolant_flow") / maxf(0.0001, float(runtime.config.get("flow_per_thrust", 1)))
 			var power_needed: float = minf(request, cooling_limit) * float(runtime.config.get("kw_per_thrust", 0))
 			if _number(id, "allocated_power") < power_needed - 0.1:
 				return "Power limited"
@@ -84,19 +125,15 @@ func equipment_status(id: String) -> String:
 		"radiator":
 			if float(settings.get("deployment", 0)) <= 0:
 				return "Closed"
-			if _incoming_flow(id) < 0.1:
+			if _number(id, "coolant_flow") < 0.1:
 				return "No circulation"
-			if _source_hot(id):
-				return "Hot"
 			if float(settings.get("deployment", 0)) < float(runtime.config.get("warning_deployment", 0)) and float(ship.totals().get("heat_generated", 0)) > 1.0:
 				return "Limited rejection"
 			return "Online"
 		"heat_exchanger":
-			if _source_hot(id):
-				return "Hot"
-			return "No circulation" if _incoming_flow(id) < 0.1 else "Online"
+			return "No circulation" if _number(id, "coolant_flow") < 0.1 else "Online"
 		"coolant":
-			return "Hot" if _hot(id) else "Online"
+			return "Online"
 		"load":
 			if _number(id, "power") < _number(id, "requested_power") - 0.1:
 				return "Unpowered" if _number(id, "power") < 0.1 else "Brownout"
@@ -124,8 +161,12 @@ func equipment_reason(id: String) -> String:
 			return "Heat rejection is disabled. Restore deployment to reject waste heat."
 		"Limited rejection":
 			return "Deployment is below its configured warning level while the ship produces heat. Increase deployment to improve heat rejection."
-		"Hot":
-			return "Temperature is above its configured warning level. Follow the cooling and heat-rejection connections."
+		"Temperature advisory":
+			var explanations: PackedStringArray = []
+			for reading in temperature_readings(id):
+				if reading.has("margin") and reading.margin < 0.0:
+					explanations.append("%s: %.1f °C, changing %.2f °C/min; %.1f °C above its %.1f °C advisory." % [_name(reading.component_id), reading.temperature, reading.rate * 60.0, -reading.margin, reading.advisory_temperature])
+			return " ".join(explanations)
 		"Ramping":
 			return "Output is settling toward the requested setting."
 	return str(ship.components[id].spec.description)
@@ -139,11 +180,12 @@ func system_summary(view_id: String) -> Dictionary:
 	var total: float = 0
 	var requested: float = 0
 	var engines: int = 0
+	var temperatures: Array[float] = []
 	var statuses: Array[String] = []
 	for id in members:
 		if not ship.components.has(id):
 			continue
-		var kind: String = _kind(id)
+		var kind: String = ship.components[id].kind
 		statuses.append(equipment_status(id))
 		match summary_kind:
 			"reactor":
@@ -164,17 +206,15 @@ func system_summary(view_id: String) -> Dictionary:
 					total += _number(id, "power")
 					requested += _number(id, "requested_power")
 			"temperature":
-				if ship.components[id].state.has("temperature"):
-					total = maxf(total, _number(id, "temperature"))
-				if kind == "radiator":
-					total = maxf(total, _incoming_temperature(id))
+				for reading in temperature_readings(id):
+					temperatures.append(reading.temperature)
 	match summary_kind:
 		"reactor", "load": value = "%.0f / %.0f kW" % [total, requested]
 		"power": value = "%.0f kW distributed" % total
 		"thrust": value = "%.1f%% mean thrust" % (total / engines) if engines > 1 else "%.1f%% thrust" % total
-		"temperature": value = "%.1f°C peak temperature" % total
+		"temperature": value = "%.1f°C peak temperature" % temperatures.max() if not temperatures.is_empty() else "No temperature readings"
 	var status: String = "Online"
-	for candidate in ["Hot", "Unpowered", "Offline", "Isolated", "Power limited", "Cooling limited", "No circulation", "Limited", "Brownout", "Closed", "Limited rejection", "Ramping"]:
+	for candidate in ["Temperature advisory", "Unpowered", "Offline", "Isolated", "Power limited", "Cooling limited", "No circulation", "Limited", "Brownout", "Closed", "Limited rejection", "Ramping"]:
 		if candidate in statuses:
 			status = candidate
 			break
@@ -189,6 +229,10 @@ func conditions() -> Array[Dictionary]:
 		var status: String = equipment_status(id)
 		if status in ["Online", "Idle", "Standby reference", "Reference", "Ramping"]:
 			continue
+		# Report each physical measurement once. Exchangers/radiators display
+		# connected temperatures but do not own duplicate temperature alarms.
+		if status == "Temperature advisory" and not ship.components[id].state.has("temperature"):
+			continue
 		var cause: String = id
 		if status in ["Power limited", "Limited", "Unpowered", "Brownout"]:
 			cause = _power_cause(id)
@@ -202,7 +246,11 @@ func conditions() -> Array[Dictionary]:
 		var workspace: String = ship.definition.workspace_for(target)
 		if workspace.is_empty():
 			continue
-		result.append({"code": _kind(id) + "." + status.to_lower().replace(" ", "_"), "text": _name(id) + ": " + status.to_lower() + ".", "system": workspace, "equipment": target, "cause_id": cause, "component_id": id})
+		var condition: Dictionary = {"code": ship.components[id].kind + "." + status.to_lower().replace(" ", "_"), "text": _name(id) + ": " + status.to_lower() + ".", "system": workspace, "equipment": target, "cause_id": cause, "component_id": id}
+		if status == "Temperature advisory":
+			condition["text"] = equipment_reason(id)
+			condition["measurement"] = temperature_readings(id)[0]
+		result.append(condition)
 	return result
 
 
@@ -231,7 +279,7 @@ func caption(id: String) -> String:
 	if not ship.components.has(id):
 		return "UNAVAILABLE"
 	var settings: Dictionary = ship.components[id].settings
-	match _kind(id):
+	match ship.components[id].kind:
 		"reactor", "bus": return "%.0f / %.0f kW" % [_number(id, "draw"), float(settings.get("limit", 0))]
 		"pump": return "%.1f / %.0f L/s" % [_number(id, "flow"), float(settings.get("flow", 0))]
 		"engine": return "%.1f / %.0f %% thrust" % [_number(id, "thrust"), float(settings.get("thrust", 0))]
@@ -296,9 +344,9 @@ func _power_cause(id: String) -> String:
 	while ship.components.has(current) and not visited.has(current):
 		visited[current] = true
 		var runtime = ship.components[current]
-		if _kind(current) == "bus" and not runtime.settings.get("closed", true):
+		if runtime.kind == "bus" and not runtime.settings.get("closed", true):
 			return current
-		if _kind(current) in ["reactor", "bus"]:
+		if runtime.kind in ["reactor", "bus"]:
 			var capacity: float = float(runtime.settings.get("limit", runtime.config.get("rated_power", INF)))
 			if _number(current, "requested_power") > capacity + 0.1 or capacity <= 0:
 				return current
@@ -323,34 +371,6 @@ func _cooling_cause(id: String) -> String:
 	return id
 
 
-func _incoming_flow(id: String) -> float:
-	if ship.components[id].state.has("coolant_flow"):
-		return _number(id, "coolant_flow")
-	var total: float = 0
-	var seen: Dictionary = {}
-	for edge in connections:
-		if edge.domain == "coolant" and edge.to_component == id and not seen.has(edge.from_component):
-			seen[edge.from_component] = true
-			var flow: float = _number(edge.from_component, "flow")
-			total += minf(flow, edge.capacity) if edge.capacity >= 0 else flow
-	return total
-
-
-func _incoming_temperature(id: String) -> float:
-	var value: float = ship.definition.ambient_temperature
-	for edge in connections:
-		if edge.domain == "thermal" and edge.to_component == id:
-			value = maxf(value, _number(edge.from_component, "temperature"))
-	return value
-
-
-func _source_hot(id: String) -> bool:
-	for edge in connections:
-		if edge.domain == "thermal" and edge.to_component == id and _hot(edge.from_component):
-			return true
-	return false
-
-
 func _has_member_power_upstream(id: String, members: Array) -> bool:
 	var visited: Dictionary = {}
 	var current: String = id
@@ -363,7 +383,7 @@ func _has_member_power_upstream(id: String, members: Array) -> bool:
 				break
 		if upstream.is_empty():
 			return false
-		if upstream in members and _kind(upstream) in ["reactor", "bus"]:
+		if upstream in members and ship.components[upstream].kind in ["reactor", "bus"]:
 			return true
 		current = upstream
 	return false
@@ -385,17 +405,9 @@ func _edge_active(from_id: String, to_id: String, domain: String) -> bool:
 	return false
 
 
-func _hot(id: String) -> bool:
-	return ship.components.has(id) and _number(id, "temperature") > float(ship.components[id].config.get("warning_temperature", INF))
-
-
 func _inspectable(id: String) -> bool:
 	var spec = ship.definition.component(id)
 	return spec != null and spec.inspectable
-
-
-func _kind(id: String) -> String:
-	return str(ship.components[id].spec.definition.kind) if ship.components.has(id) else ""
 
 
 func _name(id: String) -> String:

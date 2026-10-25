@@ -18,6 +18,9 @@ func _initialize() -> void:
 	_test_invalid_definitions()
 	_test_connection_capacity_and_accounting()
 	_test_thermal_energy_accounting()
+	_test_continuous_temperature_readings()
+	_test_temperature_advisory_policy()
+	_test_connected_temperature_readings()
 	_test_nested_bus_summary()
 	print("%s: %d architecture checks (%d failures)." % ["PASS" if failures == 0 else "FAIL", checks, failures])
 	quit(0 if failures == 0 else 1)
@@ -302,6 +305,100 @@ func _test_thermal_energy_accounting() -> void:
 		ship.tick(0.1)
 		_check(absf((_thermal_energy(ship) - before) - expected_change) < 0.00001,
 			"Internal thermal transfers conserve energy; only generation and external rejection change total stored heat.")
+
+
+func _test_continuous_temperature_readings() -> void:
+	var ship = Simulation.new(Kestrel)
+	var presenter = Presenter.new(ship)
+	var reading: Dictionary = presenter.temperature_readings("reactor")[0]
+	_check(_near(reading.temperature, 42.0) and _near(reading.rate, 0.0) and _near(reading.net_heat, 0.0),
+		"A thermal reading exposes temperature, rate, and net heat at equilibrium.")
+	_check(_near(reading.margin, 28.0), "Advisory headroom remains a numerical temperature difference.")
+	_check(presenter.temperature_readings("pump_a").is_empty() and presenter.temperature_readings("missing").is_empty(),
+		"Equipment without a thermal measurement does not invent a zero temperature.")
+	var extra_state = _copy_kestrel()
+	extra_state.component("pump_a").initial_state["temperature"] = 20.0
+	_check(Presenter.new(Simulation.new(extra_state)).temperature_readings("pump_a").is_empty(),
+		"An unused authored state field cannot masquerade as committed thermal telemetry.")
+	ship.command("pump_a", "flow", 0.0)
+	ship.tick(0.1)
+	reading = presenter.temperature_readings("reactor")[0]
+	_check(reading.rate > 0.0 and reading.net_heat > 0.0 and reading.margin > 0.0 and presenter.equipment_status("reactor") == "Online",
+		"Rising temperature is observable before a temperature advisory is reached.")
+	var before: Dictionary = ship.snapshot()
+	reading["temperature"] = -999.0
+	presenter.readings("reactor")
+	presenter.conditions()
+	_check(ship.snapshot() == before, "Reading and modifying returned telemetry cannot change physical state.")
+
+	var hot = _copy_kestrel()
+	hot.component("reactor").initial_state["temperature"] = 80.0
+	ship = Simulation.new(hot)
+	presenter = Presenter.new(ship)
+	reading = presenter.temperature_readings("reactor")[0]
+	_check(reading.rate < 0.0 and reading.net_heat < 0.0 and _near(reading.margin, -10.0),
+		"Temperature above an advisory can still have a negative cooling trend.")
+	_check(presenter.equipment_status("reactor") == "Temperature advisory" and presenter.equipment_reason("reactor").contains("°C/min"),
+		"The advisory explains the actual temperature and trend rather than just saying hot.")
+	ship.tick(0.1)
+	_check(_near(ship.components["reactor"].state.temperature, reading.temperature + reading.rate * 0.1),
+		"Published temperature rate agrees with the next fixed-step temperature change.")
+	var current: Dictionary = presenter.temperature_readings("reactor")[0]
+	_check(_near(current.net_heat, current.rate * ship.components["reactor"].config.heat_capacity),
+		"Published heat balance and rate agree at committed temperatures.")
+
+
+func _test_temperature_advisory_policy() -> void:
+	var advisory = _copy_kestrel()
+	advisory.component("reactor").parameters["warning_temperature"] = 40.0
+	var left = Simulation.new(advisory)
+	var right = Simulation.new(Kestrel)
+	_check(Presenter.new(left).equipment_status("reactor") == "Temperature advisory" and Presenter.new(right).equipment_status("reactor") == "Online",
+		"Changing an advisory setting changes the presentation policy.")
+	for ship in [left, right]:
+		ship.command("radiator", "deployment", 0.0)
+		ship.tick(20.0)
+	_check(_equivalent_components(left, right), "Advisory thresholds do not change physical trajectories or equipment output.")
+	advisory.component("reactor").parameters.erase("warning_temperature")
+	advisory.component("reactor").definition.defaults.erase("warning_temperature")
+	advisory.component("reactor").initial_state["temperature"] = 80.0
+	_check(advisory.validate().is_empty(), "Thermal observations do not require an advisory threshold.")
+	var presenter = Presenter.new(Simulation.new(advisory))
+	var reading: Dictionary = presenter.temperature_readings("reactor")[0]
+	_check(_near(reading.temperature, 80.0) and not reading.has("margin") and not reading.has("advisory_temperature") and presenter.equipment_status("reactor") == "Online",
+		"An absent advisory preserves the measurement without inventing a threshold.")
+	for value in ["hot", true, INF]:
+		advisory.component("reactor").parameters["warning_temperature"] = value
+		_check(not advisory.validate().is_empty(), "An authored temperature advisory must be finite numeric data.")
+
+
+func _test_connected_temperature_readings() -> void:
+	var definition = _copy_kestrel()
+	definition.component("reactor").initial_state["temperature"] = -20.0
+	definition.component("main_engine").initial_state["temperature"] = -30.0
+	definition.component("coolant_reservoir").initial_state["temperature"] = -40.0
+	var presenter = Presenter.new(Simulation.new(definition))
+	var radiator_reading: Dictionary = presenter.temperature_readings("radiator")[0]
+	_check(radiator_reading.component_id == "coolant_reservoir" and _near(radiator_reading.temperature, -40.0),
+		"Transfer equipment observes its connected mass, including temperatures below ambient.")
+	_check(presenter.system_summary("cooling").value == "-20.0°C peak temperature",
+		"Temperature summaries preserve negative readings instead of clamping them to zero.")
+	var observations: Array = presenter.temperature_readings("heat_exchanger")
+	_check(observations.size() == 2 and observations[0].component_id == "coolant_reservoir" and observations[1].component_id == "reactor",
+		"An exchanger exposes both connected thermal masses with identifiable measurements.")
+	definition.component("coolant_reservoir").initial_state["temperature"] = 65.0
+	presenter = Presenter.new(Simulation.new(definition))
+	_check(presenter.equipment_status("heat_exchanger") == "Temperature advisory" and presenter.equipment_reason("heat_exchanger").contains("65.0 °C"),
+		"An exchanger observes an advisory on its outlet mass, not only its inlet.")
+	var conditions: Array = presenter.conditions()
+	_check(conditions.size() == 1 and conditions[0].measurement.component_id == "coolant_reservoir" and conditions[0].equipment != "coolant_reservoir",
+		"A shared hidden thermal mass reports one numerical advisory routed to inspectable equipment.")
+	for i in range(definition.connections.size() - 1, -1, -1):
+		if definition.connections[i].id == "coolant_to_radiator":
+			definition.connections.remove_at(i)
+	presenter = Presenter.new(Simulation.new(definition))
+	_check(presenter.temperature_readings("radiator").is_empty() and presenter.readings("radiator")[3][1] == "No connection",
+		"Disconnected transfer equipment reports missing observations rather than ambient temperature.")
 
 
 func _thermal_energy(ship) -> float:

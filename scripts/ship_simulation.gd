@@ -155,7 +155,7 @@ func totals() -> Dictionary:
 	var generated: float = 0.0
 	var rejected: float = 0.0
 	for part in components.values():
-		if part.kind() == "reactor":
+		if part.kind == "reactor":
 			output += float(part.state.get("draw", 0.0))
 			capacity += float(part.state.get("capacity", 0.0))
 		generated += float(part.state.get("heat_generated", 0.0))

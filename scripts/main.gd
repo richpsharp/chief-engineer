@@ -522,9 +522,6 @@ func _refresh_inspector() -> void:
 			widget.button.text = str(descriptor.label) + ": " + ("ON  •  Switch off" if value else "OFF  •  Switch on")
 			widget.button.disabled = ship.paused
 
-func _equipment_caption(id: String) -> String:
-	return presenter.caption(id)
-
 func _tone(name_text: String) -> Color:
 	return AMBER if name_text == "warn" else (GREEN if name_text == "good" else MUTED)
 
@@ -547,12 +544,6 @@ func _change_control(value: float, action: String) -> void:
 func _toggle_control(action: String) -> void:
 	var settings: Dictionary = ship.components[selected_equipment].settings
 	ship.command(selected_equipment, action, not bool(settings.get(action, false)))
-
-func _toggle_breaker() -> void:
-	for widget in control_widgets:
-		if widget.has("button"):
-			_toggle_control(str(widget.descriptor.id))
-			return
 
 func _pause() -> void:
 	ship.toggle_pause()

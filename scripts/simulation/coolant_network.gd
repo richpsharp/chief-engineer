@@ -22,9 +22,6 @@ func flow_for(component_id: String) -> float:
 		var source_id: String = String(edge["from_component"])
 		var source = _components[source_id]
 		var flow: float = maxf(0.0, float(source.state.get("flow", 0.0)))
-		var capacity: float = float(edge.get("capacity", -1.0))
-		if capacity >= 0.0:
-			flow = minf(flow, capacity)
 		# Multiple links from the same pump expose one circuit capability.
 		contributions[source_id] = maxf(float(contributions.get(source_id, 0.0)), flow)
 	var total: float = 0.0

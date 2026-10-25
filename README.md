@@ -45,6 +45,8 @@ Pump A also circulates coolant through the shared radiator. Stopping it prevents
 
 The main-engine inspector in Cooling includes an engine command, initially **30%**. Actual engine performance is constrained by the cooling it receives. Power, flow, temperatures, and engine output provide different views of the same dependencies.
 
+Temperature readings include their current rate of change in °C/min. Heat exchangers show the temperatures of both connected thermal masses. A temperature advisory reports the measurement, trend, and amount above the configured advisory level; changing that level does not change the simulation's heat flow or equipment output.
+
 ## A first experiment
 
 1. Open **Power** and select the **auxiliary bus**. Observe its normal 30 kW demand against a 40 kW limit.

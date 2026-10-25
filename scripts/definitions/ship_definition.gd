@@ -222,6 +222,9 @@ func _validate_component(item: Resource, errors: Array[String]) -> void:
 	for key in config:
 		if config[key] is float and not is_finite(config[key]):
 			errors.append("Non-finite parameter: %s:%s" % [item.id, key])
+	for key in ["warning_temperature", "warning_deployment"]:
+		if config.has(key) and not _number(config[key]):
+			errors.append("Advisory parameter must be a finite number: %s:%s" % [item.id, key])
 	for key in ["heat_capacity", "kw_per_flow", "kw_per_thrust", "flow_per_thrust", "response_seconds", "reference_flow"]:
 		if config.has(key) and (not _number(config[key]) or float(config[key]) <= 0.0):
 			errors.append("Parameter must be positive: %s:%s" % [item.id, key])

@@ -80,6 +80,8 @@ func _run() -> void:
 	_follow_link("main_engine")
 	_check(console.selected_equipment == "main_engine" and _near(_s("main_engine", "thrust"), 15.0),
 		"Following pump B to the engine shows the resulting 15 percent thrust.")
+	_check(console.reading_rows.size() == 7 and console.reading_rows[6].value.text.contains("°C/min"),
+		"The engine inspector includes the continuous temperature trend alongside its operating readings.")
 	await _capture("limited.png")
 	_press(console.back_button)
 	_check(console.selected_equipment == "pump_b", "Back retraces the engine's cooling dependency.")
@@ -118,6 +120,15 @@ func _run() -> void:
 		"Reset restores the healthy ship and refreshes inspector controls.")
 	_check_condition_route("reactor", "limit", 70.0)
 	_check_condition_route("main_engine", "thrust", 45.0)
+	console.ship.reset()
+	console.ship.command("radiator", "deployment", 0.0)
+	_tick(600.0)
+	console.navigate("cooling", "heat_exchanger")
+	_check(console.inspector_condition.text.contains("Temperature advisory") and console.inspector_condition.text.contains("°C/min"),
+		"A temperature advisory explains connected temperatures and their trends in the inspector.")
+	_check(console.reading_rows.size() == 6 and console.reading_rows[4].value.text.contains("°C/min") and console.reading_rows[5].value.text.contains("°C/min"),
+		"The exchanger inspector shows separate readings for both connected thermal masses.")
+	await _capture("thermal.png")
 	var invalid_definition = console.ship.definition.duplicate(true)
 	invalid_definition.schema_version = -1
 	var invalid_console = MainScene.instantiate()
