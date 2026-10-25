@@ -3,10 +3,12 @@ extends RefCounted
 ## Circuit circulation capability, not a pressure or fluid-inventory solver.
 var _components: Dictionary
 var _incoming: Dictionary = {}
+var _bypass
 
 
-func _init(components: Dictionary, connections: Array) -> void:
+func _init(components: Dictionary, connections: Array, bypass = null) -> void:
 	_components = components
+	_bypass = bypass
 	for edge in connections:
 		if String(edge["domain"]) != "coolant":
 			continue
@@ -17,6 +19,8 @@ func _init(components: Dictionary, connections: Array) -> void:
 
 
 func flow_for(component_id: String) -> float:
+	if _bypass != null and _bypass.has_circuit(component_id):
+		return _bypass.flow_for(component_id)
 	var contributions: Dictionary = {}
 	for edge in _incoming.get(component_id, []):
 		var source_id: String = String(edge["from_component"])
@@ -30,6 +34,10 @@ func flow_for(component_id: String) -> float:
 	for id in ids:
 		total += float(contributions[id])
 	return total
+
+
+func pump_can_run(component_id: String) -> bool:
+	return _bypass == null or _bypass.pump_can_run(component_id)
 
 
 func refresh() -> void:

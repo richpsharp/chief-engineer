@@ -142,6 +142,10 @@ func _test_renamed_and_reordered_definition() -> void:
 		var renamed_members: Array = []
 		for member in view.get("members", []): renamed_members.append(mapping[member])
 		view.members = renamed_members
+	for circuit in transformed.coolant_circuits:
+		circuit.pump = mapping[circuit.pump]
+		circuit.service_component = mapping[circuit.service_component]
+		circuit.members = circuit.members.map(func(member): return mapping[member])
 	for layout in transformed.layouts.values():
 		var renamed_nodes: Dictionary = {}
 		for old_id in layout.nodes: renamed_nodes[mapping[old_id]] = layout.nodes[old_id]
@@ -461,7 +465,7 @@ func _test_power_constraint_diagnostics() -> void:
 	var condition: Dictionary = _condition_for(presenter, "pump_b")
 	_check(_near(ship.components["pump_b"].state.power, 6.0) and presenter.equipment_status("reactor") == "Online",
 		"A limited pump feed leaves the healthy reactor online.")
-	_check(condition.get("connection_id") == "feed_propulsion_pump" and condition.equipment == "pump_b",
+	_check(condition.get("connection_id") == "feed_propulsion_pump" and condition.equipment == "pump_b_feed",
 		"A wire-limited pump condition identifies the connection and opens its receiving equipment.")
 	_check(presenter.equipment_reason("pump_b").contains("6.0 kW") and not presenter.equipment_reason("pump_b").contains("Inspect Reactor"),
 		"The explanation names the wire rating instead of blaming a healthy reactor.")

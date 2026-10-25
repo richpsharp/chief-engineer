@@ -94,6 +94,10 @@ func _test_single_supply() -> void:
 
 func _test_disconnected_supply() -> void:
 	var definition = Fixtures.copy_kestrel()
+	# This fixture exercises legacy disconnected coolant ports, rather than a
+	# serviceable circuit whose declared members require a complete native route.
+	definition.coolant_circuits.clear()
+	definition.bypass_kits = 0
 	for edge in definition.connections.duplicate():
 		var target: Dictionary = definition.resolve_port(edge.to_component, edge.to_port)
 		if target.get("component") == "main_engine" and target.get("domain") == "coolant":
@@ -109,6 +113,9 @@ func _test_disconnected_supply() -> void:
 
 func _dual_feed(reversed: bool):
 	var definition = Fixtures.copy_kestrel()
+	# Independent legacy supplies remain supported outside managed circuits.
+	definition.coolant_circuits.clear()
+	definition.bypass_kits = 0
 	definition.component("main_engine").definition.ports["flow_secondary"] = {"domain": "coolant", "direction": "in"}
 	var link = Connection.new()
 	link.id = "backup_engine_circulation"
