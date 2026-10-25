@@ -40,6 +40,8 @@ Runtime `power_constraint: Dictionary` is derived diagnostic evidence, rebuilt e
 
 Methods `tick(delta)`, `reset()`, `toggle_pause()`, `command(target_id, action, value) -> Dictionary` with `{accepted, reason, sequence}`; action matches control ID, toggle callers supply desired boolean. Invalid/paused commands rejected, valid commands queued and applied on next fixed step. `snapshot() -> Dictionary` returns a detached state/settings map for testing/saves. `totals() -> Dictionary` with `output`, `capacity`, `spare`, `heat_generated`, `heat_rejected`. Runtime owns physical calculations, command validation, committed readings, and the human-readable command history. Equipment IDs come from definitions; panel formatting lives in the presenter.
 
+`thermal_transfer(connection_id) -> float` returns committed net heat transfer in kW along that thermal connection, positive in the authored direction and negative for reverse exchange. Unknown or inactive connections return zero. The thermal model refreshes this derived telemetry on every solve, including initialization and reset; it is not additional saved state. Exchanger inlet and outlet readings account for the heat actually exchanged, and each radiator inlet reports its own contribution to rejection.
+
 ## Presentation API
 
 `ShipPresenter.new(simulation)` in `scripts/presentation/ship_presenter.gd`. Methods `readings(id) -> Array[Array]`, `equipment_status(id) -> String`, `equipment_reason(id) -> String`, `system_summary(view_id) -> Dictionary {state,value,detail,tone}`, `conditions() -> Array[Dictionary]` entries `{code,text,system,equipment,cause_id}`, `links(id) -> Array[Dictionary]` entries `{system,equipment,label}`, `caption(id) -> String`. Derive dependencies from resolved connections; no named Kestrel IDs. Readings raw values remain runtime numeric; formatting only presenter.
@@ -53,6 +55,8 @@ Cooling diagnostics consider every contributing pump, independently of connectio
 Conditions with no inspectable equipment route to a view containing the affected component, with `equipment` empty. If no authored view contains it, both `system` and `equipment` are empty: the warning still counts and displays without an inspect button. A connection-limited condition includes `connection_id` and routes to the receiving equipment when possible.
 
 Views: `{id,name,kind,summary_kind,description,detail,members}`. Kind workspace or summary. Summary kinds power/temperature/thrust/load/reactor. Members are leaf IDs for aggregation/navigation; departments may overlap. Layouts keyed by view ID: `{nodes: Dictionary}` maps leaf IDs to `Rect2`. Schematic edges derive from connections and the visible endpoints (no duplicated wiring lists). Thermal-only hidden coolant reservoir may be omitted from initial schematic.
+
+Schematic activity follows committed connection readings. A thermal connection is active when its transfer magnitude exceeds 0.01 kW, including reverse exchange. A collapsed route through hidden components is active only when an active path connects its endpoints. This indicates exchange along the route, not attribution of a particular source's heat through shared storage; animation direction remains the authored connection direction.
 
 Views may supply `nav_name` as a shorter sidebar label. Power summaries count network boundaries once even with nested member buses; multi-engine summaries report mean thrust. The heat strip reports active radiator rejection; passive thermal losses account for the remaining equilibrium heat loss.
 

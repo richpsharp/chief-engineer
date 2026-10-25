@@ -8,6 +8,8 @@ var _ambient: float
 var _ids: Array = []
 var _incoming: Dictionary = {}
 var _outgoing: Dictionary = {}
+## Derived signed kW in each thermal connection's authored direction.
+var transfers: Dictionary = {}
 
 
 func _init(components: Dictionary, connections: Array, power, ambient: float) -> void:
@@ -34,6 +36,7 @@ func _init(components: Dictionary, connections: Array, power, ambient: float) ->
 
 
 func solve(delta: float) -> void:
+	transfers.clear()
 	var net_heat: Dictionary = {}
 	var temperatures: Dictionary = {}
 	for id in _ids:
@@ -76,6 +79,8 @@ func solve(delta: float) -> void:
 					net_heat[source] -= transfer
 					net_heat[target] += transfer
 					part.state["heat_transfer"] += transfer
+					_record_transfer(inlet.id, transfer)
+					_record_transfer(outlet.id, transfer)
 		elif part.kind == "engine" and temperatures.has(id):
 			for outlet in _outgoing.get(id, []):
 				var target: String = String(outlet["to_component"])
@@ -85,6 +90,7 @@ func solve(delta: float) -> void:
 				net_heat[id] -= transfer
 				net_heat[target] += transfer
 				part.state["heat_transfer"] += transfer
+				_record_transfer(outlet.id, transfer)
 		elif part.kind == "radiator":
 			for inlet in _incoming.get(id, []):
 				var source: String = String(inlet["from_component"])
@@ -95,6 +101,7 @@ func solve(delta: float) -> void:
 				rejection *= float(part.state["coolant_flow"]) / float(part.config.get("reference_flow", 24.0))
 				net_heat[source] -= rejection
 				part.state["heat_rejected"] += rejection
+				_record_transfer(inlet.id, rejection)
 	for id in temperatures:
 		var capacity: float = float(_components[id].config["heat_capacity"])
 		var rate: float = float(net_heat[id]) / capacity
@@ -104,3 +111,7 @@ func solve(delta: float) -> void:
 		_components[id].state["temperature_rate"] = rate
 		if delta > 0.0:
 			_components[id].state["temperature"] = float(temperatures[id]) + rate * delta
+
+
+func _record_transfer(connection_id: String, kilowatts: float) -> void:
+	transfers[connection_id] = float(transfers.get(connection_id, 0.0)) + kilowatts

@@ -149,6 +149,10 @@ func snapshot() -> Dictionary:
 	}
 
 
+func thermal_transfer(connection_id: String) -> float:
+	return float(_thermal.transfers.get(connection_id, 0.0)) if _thermal != null else 0.0
+
+
 func totals() -> Dictionary:
 	var output: float = 0.0
 	var capacity: float = 0.0

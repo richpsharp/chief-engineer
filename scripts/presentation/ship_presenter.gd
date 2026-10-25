@@ -347,13 +347,14 @@ func schematic_edges(visible_ids: Array) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	for id in visible_ids:
 		for domain in ["power", "coolant", "thermal"]:
+			var active_neighbors: Array[String] = _visible_neighbors(id, domain, true, true)
 			for target in _visible_neighbors(id, domain, true):
 				if target in visible_ids:
-					result.append({"from_component": id, "to_component": target, "domain": domain, "active": _edge_active(id, target, domain)})
+					result.append({"from_component": id, "to_component": target, "domain": domain, "active": target in active_neighbors})
 	return result
 
 
-func _visible_neighbors(id: String, domain: String, outgoing: bool) -> Array[String]:
+func _visible_neighbors(id: String, domain: String, outgoing: bool, active_only: bool = false) -> Array[String]:
 	var result: Array[String] = []
 	var queue: Array[String] = [id]
 	var visited: Dictionary = {id: true}
@@ -362,6 +363,8 @@ func _visible_neighbors(id: String, domain: String, outgoing: bool) -> Array[Str
 		for edge in connections:
 			var start: String = edge.from_component if outgoing else edge.to_component
 			if edge.domain != domain or start != current:
+				continue
+			if active_only and not _connection_active(edge):
 				continue
 			var target: String = edge.to_component if outgoing else edge.from_component
 			if visited.has(target):
@@ -420,11 +423,11 @@ func _source_names(id: String, domain: String) -> String:
 	return ", ".join(names) if not names.is_empty() else "No connection"
 
 
-func _edge_active(from_id: String, to_id: String, domain: String) -> bool:
-	match domain:
-		"power": return maxf(_number(to_id, "power"), _number(to_id, "draw")) > 0.01
-		"coolant": return _number(from_id, "flow") > 0.01
-		"thermal": return maxf(_number(from_id, "heat_transfer"), _number(from_id, "heat_generated")) > 0.01
+func _connection_active(edge: Dictionary) -> bool:
+	match edge.domain:
+		"power": return maxf(_number(edge.to_component, "power"), _number(edge.to_component, "draw")) > 0.01
+		"coolant": return _number(edge.from_component, "flow") > 0.01
+		"thermal": return absf(ship.thermal_transfer(edge.id)) > 0.01
 	return false
 
 

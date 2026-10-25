@@ -73,6 +73,7 @@ These are simplified gameplay relationships, not a real electrical or thermal en
 - `tests/test_architecture.gd` checks definition validation, runtime isolation, fixed-step behavior, and renamed/reordered copies of Kestrel.
 - `tests/test_control_validation.gd` checks authored operating ranges, labels, and safe zero settings.
 - `tests/test_power_ramp.gd` checks allocation diagnostics when pumps ramp after their engines; `tests/test_cooling_diagnostics.gd` checks diagnosis across multiple coolant supplies. The test suites share detached ship fixtures from `tests/ship_fixtures.gd`.
+- `tests/test_thermal_connections.gd` checks thermal connection readings and schematic activity for exposed reservoirs, multiple inlets, and stopped or reversed heat transfer.
 
 ### Components, ports, and assemblies
 
@@ -108,6 +109,7 @@ godot --headless --path . --script tests/test_architecture.gd
 godot --headless --path . --script tests/test_control_validation.gd
 godot --headless --path . --script tests/test_power_ramp.gd
 godot --headless --path . --script tests/test_cooling_diagnostics.gd
+godot --headless --path . --script tests/test_thermal_connections.gd
 godot --headless --path . --script tests/test_interface.gd
 godot --headless --path . --quit-after 3
 ```
