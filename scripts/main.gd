@@ -307,8 +307,6 @@ func _build_workspace() -> void:
 	var layout: Dictionary = _workspace_nodes()
 	for id in layout:
 		var spec = ship.definition.component(id)
-		if spec == null or not spec.inspectable:
-			continue
 		var rect: Rect2 = layout[id]
 		var card := _button("", rect, navigate.bind(current_system, str(id)), workspace_layer)
 		card.tooltip_text = "Inspect " + spec.display_name
@@ -327,7 +325,14 @@ func _build_workspace() -> void:
 
 
 func _workspace_nodes() -> Dictionary:
-	return ship.definition.layouts.get(current_system, {}).get("nodes", {})
+	# Cards, connection endpoints, and routing obstacles share one visible layout.
+	var visible: Dictionary = {}
+	var authored: Dictionary = ship.definition.layouts.get(current_system, {}).get("nodes", {})
+	for id in authored:
+		var spec = ship.definition.component(id)
+		if spec != null and spec.inspectable:
+			visible[id] = authored[id]
+	return visible
 
 func _build_inspector() -> void:
 	_panel(Rect2(990, 264, 418, 606), workspace_layer)

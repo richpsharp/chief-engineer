@@ -58,6 +58,8 @@ Views: `{id,name,kind,summary_kind,description,detail,members}`. Kind workspace 
 
 Schematic activity follows committed connection readings. A thermal connection is active when its transfer magnitude exceeds 0.01 kW, including reverse exchange. A collapsed route through hidden components is active only when an active path connects its endpoints. This indicates exchange along the route, not attribution of a particular source's heat through shared storage; animation direction remains the authored connection direction.
 
+Cards, connection endpoints, and routing obstacles share the same layout filtered to inspectable equipment. Hidden equipment may retain authored positions without producing dangling lines or invisible obstacles; its network connections still participate in collapsed routes.
+
 Views may supply `nav_name` as a shorter sidebar label. Power summaries count network boundaries once even with nested member buses; multi-engine summaries report mean thrust. The heat strip reports active radiator rejection; passive thermal losses account for the remaining equilibrium heat loss.
 
 The view ID `overview` is reserved for the built-in ship overview. Authored workspaces and summaries must use other IDs; the validator rejects this collision before the console starts.

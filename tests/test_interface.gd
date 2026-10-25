@@ -139,6 +139,7 @@ func _run() -> void:
 	await _capture("radiator-advisory.png")
 	await _test_configuration_diagnostics()
 	await _test_equipment_without_schematic()
+	await _test_hidden_equipment_with_schematic_position()
 	await _test_view_id_navigation()
 	var invalid_definition = console.ship.definition.duplicate(true)
 	invalid_definition.schema_version = -1
@@ -242,6 +243,53 @@ func _test_equipment_without_schematic() -> void:
 		_tick(0.1)
 		_check(console.selected_equipment == "reactor" and _setting("reactor", "limit") == 150.0,
 			"Equipment opened from the list retains its working operating controls.")
+	console.queue_free()
+	console = original_console
+	console.show()
+	await process_frame
+
+
+func _test_hidden_equipment_with_schematic_position() -> void:
+	var definition = Fixtures.copy_kestrel()
+	definition.component("pump_b").inspectable = false
+	# Put the hidden equipment's retained rectangle across another connection
+	# so it would also force a visible detour if used as a routing obstacle.
+	var pump_rect: Rect2 = definition.layouts["cooling"].nodes["pump_a"]
+	var exchanger_rect: Rect2 = definition.layouts["cooling"].nodes["heat_exchanger"]
+	var gap_x: float = (pump_rect.end.x + exchanger_rect.position.x) * 0.5
+	definition.layouts["cooling"].nodes["pump_b"] = Rect2(gap_x - 8, pump_rect.get_center().y - 16, 16, 32)
+	var authored_nodes: Dictionary = definition.layouts["cooling"].nodes.duplicate(true)
+	_check(definition.validate().is_empty(), "Hidden equipment may retain an authored schematic position.")
+	console.hide()
+	var original_console = console
+	console = MainScene.instantiate()
+	console.ship = console.Simulation.new(definition)
+	console.presenter = console.Presenter.new(console.ship)
+	root.add_child(console)
+	console.set_process(false)
+	await process_frame
+	console.navigate("cooling")
+	_check(not console.equipment_buttons.has("pump_b") and not console.equipment_list_buttons.has("pump_b"),
+		"A hidden pump has neither a schematic card nor an equipment-list entry.")
+	var layout: Dictionary = console._workspace_nodes()
+	var edges: Array = console.presenter.schematic_edges(layout.keys())
+	_check(edges.all(func(edge): return console.equipment_buttons.has(edge.from_component) and console.equipment_buttons.has(edge.to_component)),
+		"Every drawn connection terminates at displayed equipment, with no dangling hidden-pump endpoint.")
+	_check(not layout.has("pump_b"), "The drawing layout excludes the hidden pump as both an endpoint and a routing obstacle.")
+	var visible_route: PackedVector2Array = console._route_edge(pump_rect, exchanger_rect, layout)
+	var straight_route := true
+	for point in visible_route:
+		straight_route = straight_route and _near(point.y, pump_rect.get_center().y)
+	_check(straight_route, "A retained hidden rectangle cannot force a detour in a visible connection.")
+	_check(edges.any(func(edge): return edge.from_component == "pump_a" and edge.to_component == "heat_exchanger" and edge.domain == "coolant" and edge.active),
+		"Connections between the remaining visible equipment still appear active.")
+	_check(edges.any(func(edge): return edge.from_component == "heat_exchanger" and edge.to_component == "radiator" and edge.domain == "thermal" and edge.active),
+		"Thermal routes still collapse through the hidden coolant reservoir between visible equipment.")
+	_check(definition.layouts["cooling"].nodes == authored_nodes,
+		"Filtering the displayed schematic preserves the authored positions, including the hidden pump.")
+	_check(_near(_s("pump_b", "flow"), 30.0) and _near(_s("main_engine", "thrust"), 30.0),
+		"Hiding equipment does not remove its physical contribution to the running ship.")
+	await _capture("hidden-equipment.png")
 	console.queue_free()
 	console = original_console
 	console.show()
