@@ -21,6 +21,8 @@ func _initialize() -> void:
 	_test_continuous_temperature_readings()
 	_test_temperature_advisory_policy()
 	_test_connected_temperature_readings()
+	_test_simultaneous_equipment_conditions()
+	_test_engine_limit_telemetry()
 	_test_nested_bus_summary()
 	print("%s: %d architecture checks (%d failures)." % ["PASS" if failures == 0 else "FAIL", checks, failures])
 	quit(0 if failures == 0 else 1)
@@ -399,6 +401,44 @@ func _test_connected_temperature_readings() -> void:
 	presenter = Presenter.new(Simulation.new(definition))
 	_check(presenter.temperature_readings("radiator").is_empty() and presenter.readings("radiator")[3][1] == "No connection",
 		"Disconnected transfer equipment reports missing observations rather than ambient temperature.")
+
+
+func _test_simultaneous_equipment_conditions() -> void:
+	var definition = _copy_kestrel()
+	definition.component("coolant_reservoir").initial_state["temperature"] = 65.0
+	definition.component("radiator").initial_settings["deployment"] = 0.0
+	var presenter = Presenter.new(Simulation.new(definition))
+	var codes: Array = presenter.conditions().map(func(condition): return condition.code)
+	_check("radiator.closed" in codes and "coolant.temperature_advisory" in codes,
+		"Hot coolant cannot hide a closed radiator; the cause and thermal symptom remain separate conditions.")
+	_check(presenter.equipment_status("radiator") == "Closed" and presenter.equipment_reason("radiator").contains("65.0 °C"),
+		"The radiator inspector explains its closed state and connected temperature together.")
+	definition.component("reactor").initial_state["temperature"] = 80.0
+	definition.component("reactor").initial_settings["limit"] = 0.0
+	presenter = Presenter.new(Simulation.new(definition))
+	codes = presenter.conditions().map(func(condition): return condition.code)
+	_check("reactor.offline" in codes and "reactor.temperature_advisory" in codes,
+		"An offline reactor can independently retain stored heat above its advisory level.")
+	_check(presenter.equipment_status("reactor") == "Offline" and presenter.equipment_reason("reactor").contains("80.0 °C"),
+		"An offline reactor inspector preserves both operating state and temperature evidence.")
+
+
+func _test_engine_limit_telemetry() -> void:
+	var definition = _copy_kestrel()
+	definition.component("main_engine").parameters["flow_per_thrust"] = 2.0
+	definition.component("main_engine").parameters["kw_per_thrust"] = 3.0
+	var ship = Simulation.new(definition)
+	var presenter = Presenter.new(ship)
+	_check(_near(ship.components["main_engine"].state.get("cooling_limit", -1.0), 15.0)
+		and _near(ship.components["main_engine"].state.requested_power, 45.0),
+		"An engine publishes its cooling limit and power demand using its own configured conversion factors.")
+	_check(presenter.equipment_status("main_engine") == "Cooling limited", "Engine status explains the committed cooling limit.")
+	ship.command("main_bus", "limit", 70.0)
+	ship.tick(0.1)
+	_check(presenter.equipment_status("main_engine") == "Power limited", "Engine status distinguishes insufficient allocation from its cooling limit.")
+	ship.command("main_bus", "limit", 200.0)
+	ship.tick(10.0)
+	_check(presenter.equipment_status("main_engine") == "Cooling limited", "Restored electrical supply leaves the independent cooling restriction visible.")
 
 
 func _thermal_energy(ship) -> float:

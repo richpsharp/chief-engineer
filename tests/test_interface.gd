@@ -129,6 +129,13 @@ func _run() -> void:
 	_check(console.reading_rows.size() == 6 and console.reading_rows[4].value.text.contains("°C/min") and console.reading_rows[5].value.text.contains("°C/min"),
 		"The exchanger inspector shows separate readings for both connected thermal masses.")
 	await _capture("thermal.png")
+	console.navigate("cooling", "radiator")
+	_check(console.inspector_condition.text.begins_with("Closed") and console.inspector_condition.text.contains("°C/min"),
+		"The radiator inspector shows its closed state together with the hot coolant observation.")
+	var simultaneous_codes: Array = console.presenter.conditions().map(func(condition): return condition.code)
+	_check("radiator.closed" in simultaneous_codes and "coolant.temperature_advisory" in simultaneous_codes,
+		"The overview retains both the closed radiator and its thermal consequences.")
+	await _capture("radiator-advisory.png")
 	var invalid_definition = console.ship.definition.duplicate(true)
 	invalid_definition.schema_version = -1
 	var invalid_console = MainScene.instantiate()

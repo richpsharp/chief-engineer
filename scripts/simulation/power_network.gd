@@ -82,6 +82,7 @@ func solve(delta: float) -> void:
 		var part = _components[id]
 		if part.kind == "engine":
 			var limit: float = _cooling_thrust(part, id)
+			part.state["cooling_limit"] = limit
 			part.state["target_thrust"] = minf(float(part.state["target_thrust"]), limit)
 			part.state["thrust"] = minf(float(part.state["thrust"]), limit)
 			part.state["requested_power"] = _request(part, id)

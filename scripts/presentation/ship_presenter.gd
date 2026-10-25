@@ -86,15 +86,19 @@ func readings(id: String) -> Array[Array]:
 
 
 func equipment_status(id: String) -> String:
+	var status: String = _operating_status(id)
+	# Keep the actionable operating state visible when a separate temperature
+	# advisory is also present. conditions() reports both facts independently.
+	if status in ["Online", "Idle", "Reference", "Ramping"] and not _temperature_advisories(id).is_empty():
+		return "Temperature advisory"
+	return status
+
+
+func _operating_status(id: String) -> String:
 	if not ship.components.has(id):
 		return "Unavailable"
 	var runtime = ship.components[id]
 	var settings: Dictionary = runtime.settings
-	# Advisories are a presentation policy over numerical readings. They do
-	# not change equipment dynamics or collapse the thermal model to a flag.
-	for reading in temperature_readings(id):
-		if reading.has("margin") and reading.margin < 0.0:
-			return "Temperature advisory"
 	match runtime.kind:
 		"reactor":
 			if float(settings.get("limit", 0)) <= 0:
@@ -115,11 +119,9 @@ func equipment_status(id: String) -> String:
 			var request: float = float(settings.get("thrust", 0))
 			if request <= 0:
 				return "Idle"
-			var cooling_limit: float = _number(id, "coolant_flow") / maxf(0.0001, float(runtime.config.get("flow_per_thrust", 1)))
-			var power_needed: float = minf(request, cooling_limit) * float(runtime.config.get("kw_per_thrust", 0))
-			if _number(id, "allocated_power") < power_needed - 0.1:
+			if _number(id, "allocated_power") < _number(id, "requested_power") - 0.1:
 				return "Power limited"
-			if cooling_limit < request - 0.1:
+			if _number(id, "cooling_limit") < request - 0.1:
 				return "Cooling limited"
 			return "Ramping" if _number(id, "thrust") < request - 0.1 else "Online"
 		"radiator":
@@ -147,29 +149,40 @@ func equipment_reason(id: String) -> String:
 	if not ship.components.has(id):
 		return "This equipment is unavailable."
 	var status: String = equipment_status(id)
+	var reason: String = str(ship.components[id].spec.description)
 	match status:
 		"Power limited", "Limited", "Brownout", "Unpowered":
 			var cause: String = _power_cause(id)
-			return "Available electrical supply limits output. Inspect " + _name(cause) + "."
+			reason = "Available electrical supply limits output. Inspect " + _name(cause) + "."
 		"Cooling limited", "No circulation":
-			return "Circulation limits this equipment. Inspect " + _name(_cooling_cause(id)) + "."
+			reason = "Circulation limits this equipment. Inspect " + _name(_cooling_cause(id)) + "."
 		"Isolated":
-			return "Its breaker is open. Close it to restore downstream supply."
+			reason = "Its breaker is open. Close it to restore downstream supply."
 		"Offline":
-			return "Its output limit is zero. Raise the limit to make power available."
+			reason = "Its output limit is zero. Raise the limit to make power available."
 		"Closed":
-			return "Heat rejection is disabled. Restore deployment to reject waste heat."
+			reason = "Heat rejection is disabled. Restore deployment to reject waste heat."
 		"Limited rejection":
-			return "Deployment is below its configured warning level while the ship produces heat. Increase deployment to improve heat rejection."
+			reason = "Deployment is below its configured warning level while the ship produces heat. Increase deployment to improve heat rejection."
 		"Temperature advisory":
-			var explanations: PackedStringArray = []
-			for reading in temperature_readings(id):
-				if reading.has("margin") and reading.margin < 0.0:
-					explanations.append("%s: %.1f °C, changing %.2f °C/min; %.1f °C above its %.1f °C advisory." % [_name(reading.component_id), reading.temperature, reading.rate * 60.0, -reading.margin, reading.advisory_temperature])
-			return " ".join(explanations)
+			reason = ""
 		"Ramping":
-			return "Output is settling toward the requested setting."
-	return str(ship.components[id].spec.description)
+			reason = "Output is settling toward the requested setting."
+	for advisory in _temperature_advisories(id):
+		reason += " " + advisory.text
+	return reason.strip_edges()
+
+
+func _temperature_advisories(id: String) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for reading in temperature_readings(id):
+		if not reading.has("margin") or reading.margin >= 0.0:
+			continue
+		var measured_id: String = reading.component_id
+		result.append({"code": ship.components[measured_id].kind + ".temperature_advisory", "component_id": measured_id,
+			"cause_id": measured_id, "measurement": reading,
+			"text": "%s: %.1f °C, changing %.2f °C/min; %.1f °C above its %.1f °C advisory." % [_name(measured_id), reading.temperature, reading.rate * 60.0, -reading.margin, reading.advisory_temperature]})
+	return result
 
 
 func system_summary(view_id: String) -> Dictionary:
@@ -224,20 +237,26 @@ func system_summary(view_id: String) -> Dictionary:
 
 
 func conditions() -> Array[Dictionary]:
-	var result: Array[Dictionary] = []
+	var pending: Array[Dictionary] = []
 	for id in ship.components:
-		var status: String = equipment_status(id)
+		# A connected mass owns its temperature advisory; displaying it on a
+		# radiator or exchanger neither duplicates it nor replaces their state.
+		for advisory in _temperature_advisories(id):
+			if advisory.component_id == id:
+				pending.append(advisory)
+		var status: String = _operating_status(id)
 		if status in ["Online", "Idle", "Standby reference", "Reference", "Ramping"]:
-			continue
-		# Report each physical measurement once. Exchangers/radiators display
-		# connected temperatures but do not own duplicate temperature alarms.
-		if status == "Temperature advisory" and not ship.components[id].state.has("temperature"):
 			continue
 		var cause: String = id
 		if status in ["Power limited", "Limited", "Unpowered", "Brownout"]:
 			cause = _power_cause(id)
 		elif status in ["Cooling limited", "No circulation"]:
 			cause = _cooling_cause(id)
+		pending.append({"code": ship.components[id].kind + "." + status.to_lower().replace(" ", "_"), "text": _name(id) + ": " + status.to_lower() + ".", "cause_id": cause, "component_id": id})
+	var result: Array[Dictionary] = []
+	for condition in pending:
+		var id: String = condition.component_id
+		var cause: String = condition.cause_id
 		var target: String = cause if _inspectable(cause) else id
 		if not _inspectable(target):
 			for link in links(id):
@@ -246,10 +265,8 @@ func conditions() -> Array[Dictionary]:
 		var workspace: String = ship.definition.workspace_for(target)
 		if workspace.is_empty():
 			continue
-		var condition: Dictionary = {"code": ship.components[id].kind + "." + status.to_lower().replace(" ", "_"), "text": _name(id) + ": " + status.to_lower() + ".", "system": workspace, "equipment": target, "cause_id": cause, "component_id": id}
-		if status == "Temperature advisory":
-			condition["text"] = equipment_reason(id)
-			condition["measurement"] = temperature_readings(id)[0]
+		condition["system"] = workspace
+		condition["equipment"] = target
 		result.append(condition)
 	return result
 
