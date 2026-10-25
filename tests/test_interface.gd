@@ -52,7 +52,7 @@ func _run() -> void:
 		_press(console.equipment_buttons[id])
 		all_inspectors_valid = all_inspectors_valid and console.selected_equipment == id
 		all_inspectors_valid = all_inspectors_valid and console.inspector_title.text != "" and not console.reading_rows.is_empty()
-	_check(all_inspectors_valid, "All nine equipment inspectors have titles and live readings.")
+	_check(all_inspectors_valid, "All inspectable equipment has a title and live readings.")
 	_check(_state() == initial_state, "Exploring pages and equipment does not mutate the ship.")
 
 	_press(console.nav_buttons["power"])
@@ -60,10 +60,13 @@ func _run() -> void:
 	_check(console.control_slider.value == 40.0 and console.breaker_button != null,
 		"Auxiliary bus exposes its healthy capacity setting and breaker.")
 	await _capture("power.png")
+	_follow_link("pump_b_feed")
 	_follow_link("pump_b")
 	_check(console.current_system == "cooling" and console.selected_equipment == "pump_b",
-		"The auxiliary bus supply link opens cooling pump B.")
+		"The auxiliary bus and local feeder links reach cooling pump B.")
 	await _capture("cooling.png")
+	_press(console.back_button)
+	_check(console.selected_equipment == "pump_b_feed", "Back first returns to the pump's local feeder.")
 	_press(console.back_button)
 	_check(console.current_system == "power" and console.selected_equipment == "aux_bus",
 		"Back restores the previous workspace and selected equipment.")
@@ -73,6 +76,7 @@ func _run() -> void:
 	_tick(0.1)
 	_check(_setting("aux_bus", "limit") == 24.0, "The fixed step commits the inspector command.")
 	_tick(120.0)
+	_follow_link("pump_b_feed")
 	_follow_link("pump_b")
 	_check(_near(_s("pump_b", "power"), 6.0) and _near(_s("pump_b", "flow"), 15.0),
 		"The shared auxiliary limit leaves 6 kW and 15 L/s for pump B.")
@@ -81,11 +85,12 @@ func _run() -> void:
 	_follow_link("main_engine")
 	_check(console.selected_equipment == "main_engine" and _near(_s("main_engine", "thrust"), 15.0),
 		"Following pump B to the engine shows the resulting 15 percent thrust.")
-	_check(console.reading_rows.size() == 7 and console.reading_rows[6].value.text.contains("°C/min"),
+	_check(console.reading_rows.any(func(row): return row.key.text == "Temperature trend" and row.value.text.contains("°C/min")),
 		"The engine inspector includes the continuous temperature trend alongside its operating readings.")
 	await _capture("limited.png")
 	_press(console.back_button)
 	_check(console.selected_equipment == "pump_b", "Back retraces the engine's cooling dependency.")
+	_follow_link("pump_b_feed")
 	_follow_link("aux_bus")
 	_check(console.current_system == "power" and console.selected_equipment == "aux_bus" and console.control_slider.value == 24.0,
 		"Following the power source preserves the changed limit.")
@@ -127,7 +132,7 @@ func _run() -> void:
 	console.navigate("cooling", "heat_exchanger")
 	_check(console.inspector_condition.text.contains("Temperature advisory") and console.inspector_condition.text.contains("°C/min"),
 		"A temperature advisory explains connected temperatures and their trends in the inspector.")
-	_check(console.reading_rows.size() == 6 and console.reading_rows[4].value.text.contains("°C/min") and console.reading_rows[5].value.text.contains("°C/min"),
+	_check(console.reading_rows.filter(func(row): return row.value.text.contains("°C/min")).size() == 2,
 		"The exchanger inspector shows separate readings for both connected thermal masses.")
 	await _capture("thermal.png")
 	console.navigate("cooling", "radiator")
@@ -236,8 +241,9 @@ func _test_equipment_without_schematic() -> void:
 		definition.layouts["power"].nodes.clear()
 		console.navigate("overview")
 		console.navigate("power")
-		_check(console.equipment_buttons.is_empty() and console.equipment_list_buttons.size() == 4,
-			"A workspace without any schematic positions still lists all four inspectable members.")
+		var inspectable_members: Array = definition.view("power").members.filter(func(id): return definition.component(id).inspectable)
+		_check(console.equipment_buttons.is_empty() and console.equipment_list_buttons.size() == inspectable_members.size(),
+			"A workspace without any schematic positions still lists every inspectable member.")
 		_press(console.equipment_list_buttons["reactor"])
 		console.control_slider.value = 150.0
 		_tick(0.1)
@@ -251,6 +257,10 @@ func _test_equipment_without_schematic() -> void:
 
 func _test_hidden_equipment_with_schematic_position() -> void:
 	var definition = Fixtures.copy_kestrel()
+	# This fixture tests hidden routing on a ship without player service ports.
+	# A fitted service port requires an inspectable pump for operating shortcuts.
+	definition.coolant_circuits.clear()
+	definition.bypass_kits = 0
 	definition.component("pump_b").inspectable = false
 	# Put the hidden equipment's retained rectangle across another connection
 	# so it would also force a visible detour if used as a routing obstacle.

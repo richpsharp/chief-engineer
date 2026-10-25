@@ -66,10 +66,13 @@ func solve(delta: float) -> void:
 				part.state["power"] = grant
 			"pump":
 				var coefficient: float = float(part.config.get("kw_per_flow", 1.0))
-				var target: float = minf(float(part.settings.get("flow", 0.0)), grant / coefficient)
+				var efficiency: float = float(part.state.get("efficiency", 1.0))
+				var target: float = minf(float(part.settings.get("flow", 0.0)), grant / coefficient) * efficiency
+				if not part.pump_available() or not _coolant.pump_can_run(id):
+					target = 0.0
 				part.state["target_flow"] = target
 				part.state["flow"] = _respond(float(part.state.get("flow", 0.0)), target, float(part.config.get("response_seconds", 1.5)), delta)
-				part.state["power"] = float(part.state["flow"]) * coefficient
+				part.state["power"] = float(part.state["flow"]) * coefficient / efficiency
 			"engine":
 				var coefficient: float = float(part.config.get("kw_per_thrust", 2.4))
 				var target: float = minf(float(part.settings.get("thrust", 0.0)), grant / coefficient)
@@ -145,6 +148,8 @@ func _request(part, id: String) -> float:
 		"load":
 			return maxf(0.0, float(part.config.get("rated_power", 0.0)))
 		"pump":
+			if not part.pump_available() or not _coolant.pump_can_run(id):
+				return 0.0
 			return maxf(0.0, float(part.settings.get("flow", 0.0)) * float(part.config.get("kw_per_flow", 1.0)))
 		"engine":
 			return maxf(0.0, minf(float(part.settings.get("thrust", 0.0)), _cooling_thrust(part, id)) * float(part.config.get("kw_per_thrust", 2.4)))

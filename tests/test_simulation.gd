@@ -204,7 +204,8 @@ func _test_log_and_reading_contract() -> void:
 		if not spec.inspectable:
 			continue
 		var rows: Array = presenter.readings(spec.id)
-		_check(not rows.is_empty() and rows.size() <= 7, "Inspectable equipment has at most seven reading rows, including thermal trend.")
+		_check(not rows.is_empty() and rows.any(func(row): return row[0] == "Nominal service life"),
+			"Scrollable equipment readings include the life rating or an explicit unrated value.")
 		for row in rows:
 			_check(row.size() == 2 and row[0] is String and row[1] is String, "Presentation readings are label/value string pairs.")
 		_check(not presenter.equipment_status(spec.id).is_empty(), "Equipment provides a readable status.")

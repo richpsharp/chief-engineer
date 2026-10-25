@@ -8,6 +8,8 @@ const SimulationCommand = preload("res://scripts/simulation/simulation_command.g
 const CoolantNetwork = preload("res://scripts/simulation/coolant_network.gd")
 const PowerNetwork = preload("res://scripts/simulation/power_network.gd")
 const ThermalNetwork = preload("res://scripts/simulation/thermal_network.gd")
+const MaintenanceModel = preload("res://scripts/simulation/maintenance_model.gd")
+const CoolantBypass = preload("res://scripts/simulation/coolant_bypass.gd")
 const MAX_INPUT_DELTA: float = 30.0
 const FIXED_STEP_SECONDS: float = 0.1
 const HISTORY_LIMIT: int = 50
@@ -30,6 +32,8 @@ var _commands: Array = []
 var _coolant
 var _power
 var _thermal
+var _maintenance
+var _bypass
 
 
 func _init(ship_definition = null) -> void:
@@ -51,6 +55,8 @@ func reset() -> void:
 	_coolant = null
 	_power = null
 	_thermal = null
+	_maintenance = null
+	_bypass = null
 	if definition == null:
 		validation_errors.append("A ship definition is required.")
 	elif not definition.has_method("validate"):
@@ -66,9 +72,11 @@ func reset() -> void:
 		components[String(spec.id)] = ComponentRuntime.new(spec, float(definition.ambient_temperature))
 	var connections: Array = definition.resolved_connections()
 	connections.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return String(a["id"]) < String(b["id"]))
-	_coolant = CoolantNetwork.new(components, connections)
+	_bypass = CoolantBypass.new(components, connections, definition.coolant_circuits, definition.bypass_capacity, definition.bypass_kits)
+	_coolant = CoolantNetwork.new(components, connections, _bypass)
 	_power = PowerNetwork.new(components, connections, _coolant)
 	_thermal = ThermalNetwork.new(components, connections, _power, float(definition.ambient_temperature))
+	_maintenance = MaintenanceModel.new(components, connections, definition.maintenance_supplies, _bypass)
 	_power.solve(0.0)
 	_thermal.solve(0.0)
 	_record("Ship online. Configuration loaded; systems are operating.")
@@ -83,6 +91,13 @@ func tick(delta: float) -> void:
 	while _accumulator + 0.000000001 >= FIXED_STEP_SECONDS:
 		_apply_commands()
 		_power.solve(FIXED_STEP_SECONDS)
+		for message in _maintenance.advance(FIXED_STEP_SECONDS):
+			_record(message)
+		for message in _bypass.advance(FIXED_STEP_SECONDS):
+			_record(message)
+		# Commit newly worn, failed, or repaired output before the thermal solve.
+		if _maintenance.output_changed or _bypass.output_changed:
+			_power.solve(0.0)
 		_thermal.solve(FIXED_STEP_SECONDS)
 		# Publish readings at the newly committed temperatures.
 		_thermal.solve(0.0)
@@ -146,7 +161,86 @@ func snapshot() -> Dictionary:
 		"components": state, "paused": paused, "elapsed": elapsed, "step": _step_number,
 		"accumulator": snappedf(_accumulator, 0.000000001),
 		"pending_commands": queued,
+		"maintenance": _maintenance.snapshot() if _maintenance != null else {},
+		"bypass": _bypass.snapshot() if _bypass != null else {},
 	}
+
+
+func maintenance_command(target_id: Variant, action: Variant) -> Dictionary:
+	_command_sequence += 1
+	var reason: String = ""
+	if not target_id is String or not action is String:
+		reason = "Command target and action must be strings."
+	elif paused:
+		reason = "Simulation is paused."
+	elif _maintenance == null:
+		reason = "Ship definition is invalid."
+	else:
+		reason = _maintenance.reason_for(target_id, action)
+	var accepted: bool = reason.is_empty()
+	var result: Dictionary = {"accepted": accepted, "reason": "Queued for next simulation step." if accepted else reason, "sequence": _command_sequence}
+	if accepted:
+		_commands.append(SimulationCommand.new(target_id, "maintenance." + action, true, _command_sequence))
+	command_results.append(result.duplicate(true))
+	while command_results.size() > HISTORY_LIMIT:
+		command_results.pop_front()
+	return result
+
+
+func maintenance_info(id: String) -> Dictionary:
+	return _maintenance.info(id, paused) if _maintenance != null else {}
+
+
+func reliability_profile(id: String) -> Array[Dictionary]:
+	return _maintenance.profile(id) if _maintenance != null else []
+
+
+func bypass_command(action: Variant, payload: Variant = {}) -> Dictionary:
+	_command_sequence += 1
+	var reason: String = ""
+	if paused:
+		reason = "Simulation is paused."
+	elif _bypass == null:
+		reason = "Ship definition is invalid."
+	else:
+		reason = _bypass.reason_for(action, payload, not _maintenance.job.is_empty())
+	var accepted: bool = reason.is_empty()
+	var result: Dictionary = {"accepted": accepted, "reason": "Queued for next simulation step." if accepted else reason, "sequence": _command_sequence}
+	if accepted:
+		_commands.append(SimulationCommand.new("", "bypass." + action, payload, _command_sequence))
+	command_results.append(result.duplicate(true))
+	while command_results.size() > HISTORY_LIMIT:
+		command_results.pop_front()
+	return result
+
+
+func bypass_info(source_id: String = "", circuit_id: String = "") -> Dictionary:
+	return _bypass.info(source_id, circuit_id, paused, not _maintenance.job.is_empty()) if _bypass != null else {}
+
+
+func presentation_connections() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	if _bypass != null:
+		return _bypass.presentation_connections()
+	return result
+
+
+func coolant_connections() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for edge in presentation_connections():
+		if edge.domain == "coolant":
+			result.append(edge)
+	return result
+
+
+func coolant_connection_active(edge: Dictionary) -> bool:
+	if edge.domain != "coolant":
+		return false
+	return bool(edge.active) if edge.has("active") else (components.has(edge.from_component) and float(components[edge.from_component].state.get("flow", 0.0)) > 0.01)
+
+
+func coolant_pump_info(id: String) -> Dictionary:
+	return _bypass.pump_info(id) if _bypass != null else {"connected": false, "job_locked": false}
 
 
 func thermal_transfer(connection_id: String) -> float:
@@ -169,6 +263,12 @@ func totals() -> Dictionary:
 
 func _apply_commands() -> void:
 	for item in _commands:
+		if item.action.begins_with("bypass."):
+			_record(_bypass.apply(item.action.trim_prefix("bypass."), item.value, not _maintenance.job.is_empty()))
+			continue
+		if item.action.begins_with("maintenance."):
+			_record(_maintenance.apply(item.target_id, item.action.trim_prefix("maintenance.")))
+			continue
 		var part = components[item.target_id]
 		part.settings[item.action] = item.value
 		var descriptor: Dictionary = part.control(item.action)

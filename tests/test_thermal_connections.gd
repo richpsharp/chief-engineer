@@ -87,6 +87,9 @@ func _test_independent_radiators() -> void:
 	definition.view("cooling").members.append(closed.id)
 	definition.connections.append(_link("coolant_to_closed", "coolant_reservoir", "heat_out", closed.id, "heat_in"))
 	definition.connections.append(_link("closed_circulation", "pump_a", "flow_out", closed.id, "flow_in"))
+	for circuit in definition.coolant_circuits:
+		if circuit.pump == "pump_a":
+			circuit.members.append(closed.id)
 	_check(definition.validate().is_empty(), "A reservoir can supply independently controlled radiator banks.")
 	var ship = Simulation.new(definition)
 	var presenter = Presenter.new(ship)

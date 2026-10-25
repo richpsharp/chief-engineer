@@ -3,13 +3,16 @@ extends RefCounted
 
 ## Human-readable views over committed component state. No ship-specific IDs.
 var ship
-var connections: Array[Dictionary] = []
+var connections: Array[Dictionary]:
+	get:
+		var result: Array[Dictionary] = []
+		if ship.validation_errors.is_empty():
+			result.assign(ship.presentation_connections())
+		return result
 
 
 func _init(simulation) -> void:
 	ship = simulation
-	if ship.validation_errors.is_empty():
-		connections = ship.definition.resolved_connections()
 
 
 func temperature_readings(id: String) -> Array[Dictionary]:
@@ -82,6 +85,16 @@ func readings(id: String) -> Array[Array]:
 		if thermal.size() > 1:
 			value = _temp(reading.temperature) + " / " + value
 		result.append([label, value])
+	var maintenance: Dictionary = ship.maintenance_info(id)
+	if runtime.kind not in ["battery", "coolant"]:
+		result.append(["Operating hours", "%.1f h" % float(maintenance.running_hours)])
+	result.append(["Nominal service life", "%.0f h" % float(maintenance.rated_life_hours) if maintenance.rated_life_hours > 0 else "Not rated"])
+	if maintenance.supported:
+		result.append(["Flow efficiency", _percent(float(maintenance.efficiency) * 100.0)])
+	var circuit: Dictionary = _coolant_circuit(id)
+	if not circuit.is_empty():
+		result.append(["Circuit flow", _flow(float(circuit.delivered_flow))])
+		result.append(["Primary valve", "OPEN" if circuit.primary_open else "CLOSED"])
 	return result
 
 
@@ -109,12 +122,24 @@ func _operating_status(id: String) -> String:
 				return "Isolated"
 			return "Limited" if _number(id, "requested_power") > _number(id, "allocated_power") + 0.1 else "Online"
 		"pump":
+			var maintenance: Dictionary = ship.maintenance_info(id)
+			if not str(maintenance.job).is_empty():
+				return "Maintenance"
+			if maintenance.failed:
+				return "Failed"
+			var routing: Dictionary = ship.coolant_pump_info(id)
+			if routing.job_locked:
+				return "Bypass work"
 			var request: float = float(settings.get("flow", 0))
 			if request <= 0:
 				return "Idle"
-			if _number(id, "target_flow") < request - 0.1:
+			if not routing.connected:
+				return "Outlet isolated"
+			if _number(id, "allocated_power") < _number(id, "requested_power") - 0.1:
 				return "Power limited"
-			return "Ramping" if _number(id, "flow") < request - 0.1 else "Online"
+			if float(maintenance.efficiency) < 0.999:
+				return "Patched" if maintenance.patch_remaining_hours > 0 else "Degraded"
+			return "Ramping" if _number(id, "flow") < _number(id, "target_flow") - 0.1 else "Online"
 		"engine":
 			var request: float = float(settings.get("thrust", 0))
 			if request <= 0:
@@ -151,6 +176,12 @@ func equipment_reason(id: String) -> String:
 	var status: String = equipment_status(id)
 	var reason: String = str(ship.components[id].spec.description)
 	match status:
+		"Failed", "Maintenance", "Degraded", "Patched":
+			reason = str(ship.maintenance_info(id).reason)
+		"Bypass work":
+			reason = "Bypass installation or removal holds this pump offline. Keep both endpoint pumps electrically isolated and their primary valves closed."
+		"Outlet isolated":
+			reason = "Its primary coolant valve is closed and no bypass outlet is open. Use the coolant bypass panel to restore a circulation route."
 		"Power limited", "Limited", "Brownout", "Unpowered":
 			var constraint: Dictionary = ship.components[id].power_constraint
 			var cause: String = str(constraint.get("component_id", id))
@@ -166,6 +197,9 @@ func equipment_reason(id: String) -> String:
 		"Cooling limited", "No circulation":
 			var cause: String = _cooling_cause(id)
 			reason = "Combined circulation is insufficient for this equipment. Inspect its coolant connections and flow settings." if cause == id else "Circulation limits this equipment. Inspect " + _name(cause) + "."
+			var circuit: Dictionary = _coolant_circuit(id)
+			if not circuit.is_empty():
+				reason += " " + _circuit_reason(circuit)
 		"Isolated":
 			reason = "Its breaker is open. Close it to restore downstream supply."
 		"Offline":
@@ -237,7 +271,7 @@ func system_summary(view_id: String) -> Dictionary:
 		"thrust": value = "%.1f%% mean thrust" % (total / engines) if engines > 1 else "%.1f%% thrust" % total
 		"temperature": value = "%.1f°C peak temperature" % temperatures.max() if not temperatures.is_empty() else "No temperature readings"
 	var status: String = "Online"
-	for candidate in ["Temperature advisory", "Unpowered", "Offline", "Isolated", "Power limited", "Cooling limited", "No circulation", "Limited", "Brownout", "Closed", "Limited rejection", "Ramping"]:
+	for candidate in ["Failed", "Maintenance", "Bypass work", "Temperature advisory", "Unpowered", "Offline", "Isolated", "Outlet isolated", "Power limited", "Cooling limited", "No circulation", "Degraded", "Patched", "Limited", "Brownout", "Closed", "Limited rejection", "Ramping"]:
 		if candidate in statuses:
 			status = candidate
 			break
@@ -255,6 +289,12 @@ func conditions() -> Array[Dictionary]:
 			if advisory.component_id == id:
 				pending.append(advisory)
 		var status: String = _operating_status(id)
+		# A supply problem or idle setting can coexist with worn machinery.
+		# Keep the wear condition discoverable without hiding the supply cause.
+		if ship.components[id].kind == "pump":
+			var maintenance: Dictionary = ship.maintenance_info(id)
+			if float(maintenance.efficiency) < 0.999 and status not in ["Failed", "Maintenance", "Degraded", "Patched"]:
+				pending.append({"code": "pump.degraded", "component_id": id, "cause_id": id, "text": _name(id) + ": worn pump, reduced flow efficiency."})
 		if status in ["Online", "Idle", "Standby reference", "Reference", "Ramping"]:
 			continue
 		var cause: String = id
@@ -268,6 +308,13 @@ func conditions() -> Array[Dictionary]:
 		if constraint.has("connection_id"):
 			condition["connection_id"] = constraint.connection_id
 		pending.append(condition)
+	var bypass: Dictionary = ship.bypass_info()
+	if bypass.open and bypass.delivered_flow < bypass.requested_flow - 0.1:
+		for circuit in bypass.circuits:
+			if circuit.id == bypass.circuit_id:
+				pending.append({"code": "coolant.bypass_shortfall", "component_id": str(circuit.service_component),
+					"cause_id": _cooling_cause(str(circuit.service_component)),
+					"text": "Coolant bypass: %.1f / %.1f L/s requested; donor flow is insufficient." % [float(bypass.delivered_flow), float(bypass.requested_flow)]})
 	var result: Array[Dictionary] = []
 	for condition in pending:
 		var id: String = condition.component_id
@@ -305,6 +352,9 @@ func links(id: String) -> Array[Dictionary]:
 				var relation: String = "Supplies" if outgoing else "Supply"
 				if domain == "coolant":
 					relation = "Circulates to" if outgoing else "Circulation"
+					var bypass_link: bool = connections.any(func(edge): return edge.get("bypass", false) and ((edge.from_component == id and edge.to_component == target) if outgoing else (edge.to_component == id and edge.from_component == target)))
+					if bypass_link:
+						relation = "Bypass to" if outgoing else "Bypass supply"
 				elif domain == "thermal":
 					relation = "Heat destination" if outgoing else "Heat source"
 				result.append({"system": workspace, "equipment": target, "label": relation + ": " + _name(target)})
@@ -350,7 +400,8 @@ func schematic_edges(visible_ids: Array) -> Array[Dictionary]:
 			var active_neighbors: Array[String] = _visible_neighbors(id, domain, true, true)
 			for target in _visible_neighbors(id, domain, true):
 				if target in visible_ids:
-					result.append({"from_component": id, "to_component": target, "domain": domain, "active": target in active_neighbors})
+					var is_bypass: bool = connections.any(func(edge): return edge.from_component == id and edge.to_component == target and edge.domain == domain and edge.get("bypass", false))
+					result.append({"from_component": id, "to_component": target, "domain": domain, "active": target in active_neighbors, "bypass": is_bypass})
 	return result
 
 
@@ -379,13 +430,20 @@ func _visible_neighbors(id: String, domain: String, outgoing: bool, active_only:
 
 func _cooling_cause(id: String) -> String:
 	var pumps: Array[String] = []
-	for edge in connections:
-		if edge.domain == "coolant" and edge.to_component == id and edge.from_component not in pumps:
-			pumps.append(edge.from_component)
+	var circuit: Dictionary = _coolant_circuit(id)
+	if not circuit.is_empty():
+		var selected_source: String = str(circuit.get("source_id", ""))
+		if selected_source.is_empty():
+			return str(circuit.service_component)
+		pumps.append(selected_source)
+	else:
+		for edge in connections:
+			if edge.domain == "coolant" and edge.to_component == id and edge.from_component not in pumps:
+				pumps.append(edge.from_component)
 	pumps.sort()
 	# Prefer an observed restriction across all contributors. Link declaration
 	# order must not turn a healthy pump into the cause of a shared shortfall.
-	for status in ["Power limited", "Idle", "Ramping"]:
+	for status in ["Power limited", "Failed", "Maintenance", "Bypass work", "Outlet isolated", "Degraded", "Patched", "Idle", "Ramping"]:
 		for pump_id in pumps:
 			if _operating_status(pump_id) != status:
 				continue
@@ -395,6 +453,26 @@ func _cooling_cause(id: String) -> String:
 	# A sole supply is still the useful target for a low flow setting. With
 	# several healthy supplies, keep their aggregate shortfall at the consumer.
 	return pumps[0] if pumps.size() == 1 else id
+
+
+func _coolant_circuit(id: String) -> Dictionary:
+	for circuit in ship.bypass_info().circuits:
+		if circuit.pump == id or id in circuit.members:
+			return circuit
+	return {}
+
+
+func _circuit_reason(circuit: Dictionary) -> String:
+	var bypass: Dictionary = ship.bypass_info()
+	if bypass.open and bypass.circuit_id == circuit.id:
+		return "The installed bypass supplies %.1f / %.1f L/s requested (kit rating %.1f). Its donor is %s." % [float(bypass.delivered_flow), float(bypass.requested_flow), float(bypass.capacity), _name(str(bypass.source_id))]
+	if bypass.open and bypass.source_id == circuit.pump:
+		if not circuit.primary_open:
+			return "%s supplies the bypass, but this circuit's primary valve is closed. Reopen that valve to restore native circulation." % _name(str(circuit.pump))
+		return "%s shares %.1f L/s: %.1f goes through the bypass and %.1f remains for this circuit. Adjust diversion or pump output in the coolant bypass panel." % [_name(str(circuit.pump)), float(bypass.source_flow), float(bypass.delivered_flow), float(bypass.source_remaining_flow)]
+	if not circuit.primary_open:
+		return "This circuit's primary valve is closed. Restore its primary route or open a fitted bypass in the coolant bypass panel."
+	return "The circuit currently receives %.1f L/s." % float(circuit.delivered_flow)
 
 
 func _has_member_power_upstream(id: String, members: Array) -> bool:
@@ -416,6 +494,11 @@ func _has_member_power_upstream(id: String, members: Array) -> bool:
 
 
 func _source_names(id: String, domain: String) -> String:
+	if domain == "coolant":
+		var circuit: Dictionary = _coolant_circuit(id)
+		if not circuit.is_empty():
+			var source: String = str(circuit.get("source_id", ""))
+			return _name(source) + (" (bypass)" if circuit.bypass_flow > 0.0 else "") if not source.is_empty() else "Circuit isolated"
 	var names: Array[String] = []
 	for edge in connections:
 		if edge.domain == domain and edge.to_component == id:
@@ -426,7 +509,7 @@ func _source_names(id: String, domain: String) -> String:
 func _connection_active(edge: Dictionary) -> bool:
 	match edge.domain:
 		"power": return maxf(_number(edge.to_component, "power"), _number(edge.to_component, "draw")) > 0.01
-		"coolant": return _number(edge.from_component, "flow") > 0.01
+		"coolant": return bool(edge.get("active", _number(edge.from_component, "flow") > 0.01))
 		"thermal": return absf(ship.thermal_transfer(edge.id)) > 0.01
 	return false
 

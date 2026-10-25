@@ -18,6 +18,7 @@ func _init(component_spec, ambient_temperature: float = 10.0) -> void:
 		settings[String(control["id"])] = control.get("default")
 	settings.merge(spec.initial_settings.duplicate(true), true)
 	state = spec.initial_state.duplicate(true)
+	state["running_hours"] = float(state.get("running_hours", 0.0))
 	for key in ["power", "allocated_power", "requested_power", "draw", "heat_generated", "heat_rejected", "heat_transfer", "coolant_flow"]:
 		if not state.has(key):
 			state[key] = 0.0
@@ -25,6 +26,12 @@ func _init(component_spec, ambient_temperature: float = 10.0) -> void:
 		"pump":
 			state["flow"] = float(state.get("flow", 0.0))
 			state["target_flow"] = 0.0
+			state["service_age_hours"] = float(state.get("service_age_hours", state.running_hours))
+			for key in ["failed", "patch_remaining_hours", "risk_exposure", "replacement_count"]:
+				state[key] = float(state.get(key, 0.0))
+			state["efficiency"] = 1.0
+			state["failure_rate"] = 0.0
+			state["maintenance_locked"] = 0.0
 		"engine":
 			state["thrust"] = float(state.get("thrust", 0.0))
 			state["target_thrust"] = 0.0
@@ -41,3 +48,7 @@ func control(action: String) -> Dictionary:
 
 func detached_snapshot() -> Dictionary:
 	return {"settings": settings.duplicate(true), "state": state.duplicate(true)}
+
+
+func pump_available() -> bool:
+	return float(state.get("failed", 0.0)) == 0.0 and float(state.get("maintenance_locked", 0.0)) == 0.0

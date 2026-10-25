@@ -79,6 +79,32 @@ initial_settings = {"flow": 24}
 initial_state = {"flow": 24}
 inspectable = true
 
+[sub_resource type="Resource" id="pump_a_feed"]
+script = ExtResource("spec")
+id = "pump_a_feed"
+display_name = "Pump A service feeder"
+short_name = "Pump A feed"
+description = "Local electrical isolation for pump A. Opening this breaker leaves the main bus and engine energized."
+parent_id = "distribution"
+definition = ExtResource("type_bus")
+parameters = {"rated_power": 18}
+initial_settings = {"limit": 18, "closed": true}
+initial_state = {}
+inspectable = true
+
+[sub_resource type="Resource" id="pump_b_feed"]
+script = ExtResource("spec")
+id = "pump_b_feed"
+display_name = "Pump B service feeder"
+short_name = "Pump B feed"
+description = "Local electrical isolation for pump B. Its feeder and auxiliary bus both constrain pump power."
+parent_id = "distribution"
+definition = ExtResource("type_bus")
+parameters = {"rated_power": 18}
+initial_settings = {"limit": 18, "closed": true}
+initial_state = {}
+inspectable = true
+
 [sub_resource type="Resource" id="pump_b"]
 script = ExtResource("spec")
 id = "pump_b"
@@ -317,6 +343,14 @@ script = ExtResource("connection")
 id = "feed_pump_a"
 from_component = "main_bus"
 from_port = "power_out"
+to_component = "pump_a_feed"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_local_pump_a"]
+script = ExtResource("connection")
+id = "local_pump_a"
+from_component = "pump_a_feed"
+from_port = "power_out"
 to_component = "pump_a"
 to_port = "power_in"
 
@@ -340,6 +374,14 @@ to_port = "power_in"
 script = ExtResource("connection")
 id = "feed_propulsion_pump"
 from_component = "aux_bus"
+from_port = "power_out"
+to_component = "pump_b_feed"
+to_port = "power_in"
+
+[sub_resource type="Resource" id="link_local_pump_b"]
+script = ExtResource("connection")
+id = "local_pump_b"
+from_component = "pump_b_feed"
 from_port = "power_out"
 to_component = "propulsion"
 to_port = "pump_power"
@@ -414,9 +456,15 @@ schema_version = 1
 id = "kestrel"
 display_name = "Kestrel"
 ambient_temperature = 10.0
-components = Array[Resource]([SubResource("reactor"), SubResource("main_bus"), SubResource("aux_bus"), SubResource("battery"), SubResource("pump_a"), SubResource("pump_b"), SubResource("heat_exchanger"), SubResource("radiator"), SubResource("main_engine"), SubResource("coolant_reservoir"), SubResource("life_support"), SubResource("avionics"), SubResource("hull_services"), SubResource("shielding"), SubResource("sensors"), SubResource("habitat")])
+bypass_capacity = 24.0
+bypass_kits = 1
+coolant_circuits = Array[Dictionary]([
+  {"id": "core_loop", "name": "Core / radiator circuit", "pump": "pump_a", "members": ["heat_exchanger", "radiator"], "service_component": "heat_exchanger", "reference_flow": 24.0},
+  {"id": "drive_loop", "name": "Engine circuit", "pump": "pump_b", "members": ["main_engine"], "service_component": "main_engine", "reference_flow": 30.0}
+])
+components = Array[Resource]([SubResource("reactor"), SubResource("main_bus"), SubResource("aux_bus"), SubResource("battery"), SubResource("pump_a"), SubResource("pump_a_feed"), SubResource("pump_b_feed"), SubResource("pump_b"), SubResource("heat_exchanger"), SubResource("radiator"), SubResource("main_engine"), SubResource("coolant_reservoir"), SubResource("life_support"), SubResource("avionics"), SubResource("hull_services"), SubResource("shielding"), SubResource("sensors"), SubResource("habitat")])
 assemblies = Array[Resource]([SubResource("assembly_engineering"), SubResource("assembly_power_plant"), SubResource("assembly_distribution"), SubResource("assembly_propulsion"), SubResource("assembly_drive_unit"), SubResource("assembly_thermal_network")])
-connections = Array[Resource]([SubResource("link_source_main"), SubResource("link_source_aux"), SubResource("link_feed_life_support"), SubResource("link_feed_avionics"), SubResource("link_feed_hull_services"), SubResource("link_feed_shielding"), SubResource("link_feed_pump_a"), SubResource("link_feed_sensors"), SubResource("link_feed_habitat"), SubResource("link_feed_propulsion_pump"), SubResource("link_feed_engine"), SubResource("link_core_circulation"), SubResource("link_radiator_circulation"), SubResource("link_engine_circulation"), SubResource("link_core_heat"), SubResource("link_core_to_coolant"), SubResource("link_engine_to_coolant"), SubResource("link_coolant_to_radiator")])
+connections = Array[Resource]([SubResource("link_source_main"), SubResource("link_source_aux"), SubResource("link_feed_life_support"), SubResource("link_feed_avionics"), SubResource("link_feed_hull_services"), SubResource("link_feed_shielding"), SubResource("link_feed_pump_a"), SubResource("link_local_pump_a"), SubResource("link_feed_sensors"), SubResource("link_feed_habitat"), SubResource("link_feed_propulsion_pump"), SubResource("link_local_pump_b"), SubResource("link_feed_engine"), SubResource("link_core_circulation"), SubResource("link_radiator_circulation"), SubResource("link_engine_circulation"), SubResource("link_core_heat"), SubResource("link_core_to_coolant"), SubResource("link_engine_to_coolant"), SubResource("link_coolant_to_radiator")])
 views = Array[Dictionary]([
   {
     "id": "reactor",
@@ -440,6 +488,8 @@ views = Array[Dictionary]([
       "reactor",
       "main_bus",
       "aux_bus",
+      "pump_a_feed",
+      "pump_b_feed",
       "battery"
     ]
   },
@@ -517,4 +567,4 @@ views = Array[Dictionary]([
     "nav_name": "Hull"
   }
 ])
-layouts = {"power": {"nodes": {"reactor": Rect2(266, 432, 186, 106), "main_bus": Rect2(514, 366, 198, 106), "aux_bus": Rect2(514, 574, 198, 106), "battery": Rect2(266, 678, 186, 92), "pump_a": Rect2(770, 366, 190, 106), "pump_b": Rect2(770, 574, 190, 106)}}, "cooling": {"nodes": {"pump_a": Rect2(266, 384, 186, 106), "heat_exchanger": Rect2(514, 384, 198, 106), "pump_b": Rect2(266, 610, 186, 106), "main_engine": Rect2(514, 610, 198, 106), "radiator": Rect2(770, 495, 190, 106)}}}
+layouts = {"power": {"nodes": {"reactor": Rect2(254, 478, 160, 106), "main_bus": Rect2(436, 366, 160, 106), "aux_bus": Rect2(436, 610, 160, 106), "pump_a_feed": Rect2(618, 366, 160, 106), "pump_b_feed": Rect2(618, 610, 160, 106), "pump_a": Rect2(800, 366, 160, 106), "pump_b": Rect2(800, 610, 160, 106), "battery": Rect2(254, 704, 160, 92)}}, "cooling": {"nodes": {"pump_a": Rect2(266, 384, 186, 106), "heat_exchanger": Rect2(514, 384, 198, 106), "pump_b": Rect2(266, 610, 186, 106), "main_engine": Rect2(514, 610, 198, 106), "radiator": Rect2(770, 495, 190, 106)}}}
