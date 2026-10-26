@@ -357,8 +357,106 @@ func links(id: String) -> Array[Dictionary]:
 						relation = "Bypass to" if outgoing else "Bypass supply"
 				elif domain == "thermal":
 					relation = "Heat destination" if outgoing else "Heat source"
-				result.append({"system": workspace, "equipment": target, "label": relation + ": " + _name(target)})
+				result.append({"system": workspace, "equipment": target, "domain": domain, "label": relation + ": " + _name(target)})
 	return result
+
+
+func network_connections(domain: String) -> Array[Dictionary]:
+	## Full domain graph for relationship maps. Read-only loads and thermal
+	## inventories remain visible instead of being collapsed into other edges.
+	var result: Array[Dictionary] = []
+	var network: String = _network_domain(domain)
+	if network.is_empty():
+		return result
+	for edge in connections:
+		if _network_domain(str(edge.domain)) != network:
+			continue
+		var item: Dictionary = edge.duplicate(true)
+		item["active"] = _connection_active(edge)
+		if edge.domain == "thermal":
+			item["transfer_kw"] = ship.thermal_transfer(str(edge.id))
+		result.append(item)
+	return result
+
+
+func workspace_for_domain(id: String, domain: String) -> String:
+	## A component may participate in several networks. Workspace membership
+	## alone cannot choose the right context for a power or cooling link.
+	if not ship.components.has(id):
+		return ""
+	var network: String = _network_domain(domain)
+	if network.is_empty():
+		return ""
+	var best: String = ""
+	var best_score: int = -1
+	for view in ship.definition.views:
+		if _workspace_domain(view) != network:
+			continue
+		var score: int = 0
+		if id in view.get("members", []):
+			score += 2
+		if ship.definition.layouts.get(str(view.id), {}).get("nodes", {}).has(id):
+			score += 1
+		var view_id: String = str(view.id)
+		if score > best_score or (score == best_score and view_id < best):
+			best = view_id
+			best_score = score
+	return best
+
+
+func equipment_workspaces(id: String) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	if not ship.components.has(id):
+		return result
+	var networks: Array[String] = []
+	for edge in connections:
+		if edge.from_component != id and edge.to_component != id:
+			continue
+		var network: String = _network_domain(str(edge.domain))
+		if not network.is_empty() and network not in networks:
+			networks.append(network)
+	# A reserve battery is intentionally disconnected, but still belongs to
+	# the electrical map as a standby reference.
+	if networks.is_empty() and ship.components[id].kind == "battery":
+		networks.append("power")
+	for domain in ["power", "cooling"]:
+		if domain not in networks:
+			continue
+		var workspace: String = workspace_for_domain(id, domain)
+		if not workspace.is_empty():
+			result.append({"system": workspace, "name": str(ship.definition.view(workspace).name), "domain": domain})
+	return result
+
+
+func _network_domain(domain: String) -> String:
+	if domain == "power":
+		return "power"
+	if domain in ["cooling", "coolant", "thermal"]:
+		return "cooling"
+	return ""
+
+
+func workspace_domain(view_id: String) -> String:
+	return _workspace_domain(ship.definition.view(view_id))
+
+
+func _workspace_domain(view: Dictionary) -> String:
+	if view.get("kind", "") != "workspace":
+		return ""
+	match view.get("summary_kind", ""):
+		"power": return "power"
+		"temperature": return "cooling"
+	var electrical: int = 0
+	var cooling: int = 0
+	for id in view.get("members", []):
+		if not ship.components.has(id):
+			continue
+		match ship.components[id].kind:
+			"reactor", "bus", "battery": electrical += 1
+			"pump", "heat_exchanger", "radiator", "coolant": cooling += 1
+	if cooling > electrical:
+		return "cooling"
+	return "power" if electrical > 0 else ""
 
 
 func caption(id: String) -> String:

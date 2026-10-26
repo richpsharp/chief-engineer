@@ -7,6 +7,7 @@ const ShipCatalog = preload("res://scripts/ship_catalog.gd")
 const MaintenancePanel = preload("res://scripts/presentation/maintenance_panel.gd")
 const CoolantBypassPanel = preload("res://scripts/presentation/coolant_bypass_panel.gd")
 const EquipmentControls = preload("res://scripts/presentation/equipment_controls.gd")
+const ConnectionMap = preload("res://scripts/presentation/connection_map.gd")
 const INK = Color("08121c")
 const PANEL = Color("101f2c")
 const BORDER = Color("294050")
@@ -71,6 +72,13 @@ var summary_value: Label
 var summary_state: Label
 var summary_detail: Label
 var refresh_remaining: float = 0.0
+var connection_map: Control
+var map_domain: String = "power"
+var map_focus: String = ""
+var map_domain_buttons: Dictionary = {}
+var workspace_buttons: Dictionary = {}
+var endpoint_buttons: Dictionary = {}
+var trace_button: Button
 
 
 func _ready() -> void:
@@ -109,6 +117,8 @@ func select_ship(ship_id: String) -> bool:
 	presenter = Presenter.new(ship)
 	current_system = "overview"
 	selected_equipment = ""
+	map_domain = "power"
+	map_focus = ""
 	history.clear()
 	refresh_remaining = 0.0
 	_build_console()
@@ -252,6 +262,7 @@ func _build_shell() -> void:
 			continue
 		_add_navigation(view, y)
 		y += 54
+	_add_navigation({"id": "connections", "name": "Connections"}, y)
 	_button("Engineering log", Rect2(36, 810, 172, 42), _show_log, self).add_theme_font_size_override("font_size", 15)
 	_panel(Rect2(244, 128, 1164, 74), self)
 	_label("ELECTRICAL SUPPLY", Rect2(262, 138, 345, 20), 12, MUTED, self)
@@ -290,12 +301,15 @@ func _add_navigation(view: Dictionary, y: float) -> void:
 	nav_buttons[view.id] = button
 
 func navigate(system: String, equipment: String = "") -> void:
+	if system == "connections":
+		open_connections(map_domain, equipment)
+		return
 	var view: Dictionary = ship.definition.view(system)
 	if system != "overview" and view.is_empty():
 		return
 	if not equipment.is_empty():
 		var spec = ship.definition.component(equipment)
-		if spec == null or not spec.inspectable:
+		if spec == null:
 			return
 	elif system != "overview" and view.get("kind", "") != "workspace":
 		for id in view.get("members", []):
@@ -305,9 +319,7 @@ func navigate(system: String, equipment: String = "") -> void:
 				break
 	if current_system == system and selected_equipment == equipment and inspector_mode == "equipment":
 		return
-	history.append({"system": current_system, "equipment": selected_equipment})
-	if history.size() > 32:
-		history.pop_front()
+	_remember_view()
 	if current_system != system:
 		bypass_mode = false
 	current_system = system
@@ -321,12 +333,41 @@ func select_equipment(equipment: String) -> void:
 	navigate(current_system, equipment)
 
 
+func _remember_view() -> void:
+	history.append({"system": current_system, "equipment": selected_equipment,
+		"map_domain": map_domain, "map_focus": map_focus})
+	if history.size() > 32:
+		history.pop_front()
+
+
+func open_connections(domain: String = "", focus_id: String = "") -> void:
+	if domain.is_empty():
+		domain = "cooling" if _is_cooling_view(current_system) else "power"
+	if domain not in ["power", "cooling"]:
+		return
+	if current_system == "connections" and map_domain == domain and map_focus == focus_id:
+		return
+	_remember_view()
+	map_domain = domain
+	map_focus = focus_id if ship.components.has(focus_id) else ""
+	current_system = "connections"
+	selected_equipment = ""
+	inspector_mode = "equipment"
+	bypass_mode = false
+	_build_view()
+	_refresh()
+
+
+func _inspect_connection(id: String, domain: String) -> void:
+	var workspace: String = presenter.workspace_for_domain(id, domain)
+	if not workspace.is_empty():
+		navigate(workspace, id)
+
+
 func _deselect_equipment() -> void:
 	if selected_equipment.is_empty():
 		return
-	history.append({"system": current_system, "equipment": selected_equipment})
-	if history.size() > 32:
-		history.pop_front()
+	_remember_view()
 	selected_equipment = ""
 	inspector_mode = "equipment"
 	_build_view()
@@ -340,6 +381,8 @@ func _back() -> void:
 	inspector_mode = "equipment"
 	current_system = previous.system
 	selected_equipment = previous.equipment
+	map_domain = previous.get("map_domain", "power")
+	map_focus = previous.get("map_focus", "")
 	_build_view()
 	_refresh()
 
@@ -360,6 +403,11 @@ func _build_view() -> void:
 	equipment_list_buttons.clear()
 	equipment_labels.clear()
 	dependency_buttons.clear()
+	map_domain_buttons.clear()
+	workspace_buttons.clear()
+	endpoint_buttons.clear()
+	connection_map = null
+	trace_button = null
 	_dependency_container = null
 	_dependency_links.clear()
 	reading_rows.clear()
@@ -384,7 +432,7 @@ func _build_view() -> void:
 	back_button.add_theme_font_size_override("font_size", 14)
 	back_button.disabled = history.is_empty()
 	_button("Engineering", Rect2(348, 218, 124, 30), navigate.bind("overview", ""), breadcrumb_layer).add_theme_font_size_override("font_size", 14)
-	var view: Dictionary = ship.definition.view(current_system)
+	var view: Dictionary = {"name": "Ship connections"} if current_system == "connections" else ship.definition.view(current_system)
 	if current_system != "overview":
 		_button(str(view.name), Rect2(484, 218, 204, 30), navigate.bind(current_system, ""), breadcrumb_layer).add_theme_font_size_override("font_size", 14)
 	if inspector_mode == "bypass":
@@ -397,9 +445,25 @@ func _build_view() -> void:
 	view_description = _label("", Rect2(246, 313, 720, 28), 16, MUTED, workspace_layer)
 	if current_system == "overview":
 		_build_overview()
+	elif current_system == "connections":
+		_build_connections()
 	else:
 		_build_workspace()
 	queue_redraw()
+
+
+func _build_connections() -> void:
+	view_description.size.x = 1164
+	for i in 2:
+		var domain: String = ["power", "cooling"][i]
+		var button := _button(domain.capitalize(), Rect2(1116 + i * 146, 271, 138, 36),
+			open_connections.bind(domain, map_focus), workspace_layer)
+		button.add_theme_stylebox_override("normal", _style(Color("214452") if domain == map_domain else PANEL, CYAN if domain == map_domain else BORDER))
+		map_domain_buttons[domain] = button
+	connection_map = ConnectionMap.new()
+	_place(connection_map, Rect2(244, 350, 1164, 520), workspace_layer)
+	connection_map.inspect_requested.connect(_inspect_connection)
+	connection_map.configure(ship, presenter, map_domain, map_focus)
 
 func _build_overview() -> void:
 	var i: int = 0
@@ -425,11 +489,18 @@ func _build_overview() -> void:
 func _build_workspace() -> void:
 	var view: Dictionary = ship.definition.view(current_system)
 	var coolant_view: bool = _is_cooling_view(current_system)
+	var endpoints: Dictionary = _context_endpoints(_authored_nodes())
+	trace_button = _button("Connections ↗", Rect2(770, 272, 198, 34),
+		open_connections.bind("cooling" if coolant_view else "power", selected_equipment), workspace_layer)
+	trace_button.add_theme_font_size_override("font_size", 15)
+	view_title.size.x = 510
 	if coolant_view and ship.bypass_info().supported:
-		view_title.size.x = 440
+		view_title.size.x = 280
+		trace_button.position.x = 532
+		trace_button.size.x = 174
 		bypass_button = _button("Install / inspect bypass", Rect2(718, 272, 250, 34), open_bypass, workspace_layer)
 		bypass_button.add_theme_font_size_override("font_size", 15)
-	if not selected_equipment.is_empty() and _base_nodes().has(selected_equipment):
+	if not selected_equipment.is_empty() and _base_nodes().has(selected_equipment) and not endpoints.has(selected_equipment):
 		quick_controls = EquipmentControls.new()
 		workspace_layer.add_child(quick_controls)
 		quick_controls.configure(ship, presenter, selected_equipment, true)
@@ -443,11 +514,18 @@ func _build_workspace() -> void:
 		var spec = ship.definition.component(id)
 		var rect: Rect2 = layout[id]
 		# Selection is separate from controls; pressing the card never actuates it.
-		var card := _button("", rect, select_equipment.bind(str(id)), workspace_layer)
+		var callback: Callable = _inspect_connection.bind(str(id), endpoints[id].domain) if endpoints.has(id) else select_equipment.bind(str(id))
+		var card := _button("", rect, callback, workspace_layer)
 		card.tooltip_text = "Inspect " + spec.display_name + " in this view"
 		if id == selected_equipment:
 			card.add_theme_stylebox_override("normal", _style(Color("214452"), CYAN, 2))
 		equipment_buttons[id] = card
+		if endpoints.has(id):
+			endpoint_buttons[id] = card
+			card.tooltip_text = "Open " + spec.display_name + " in " + str(ship.definition.view(endpoints[id].system).name)
+			_label(spec.short_name if not spec.short_name.is_empty() else spec.display_name, Rect2(10, 6, rect.size.x - 20, 22), 15, TEXT, card)
+			_label(str(ship.definition.view(endpoints[id].system).name) + " ↗", Rect2(10, 33, rect.size.x - 20, 22), 13, CYAN, card)
+			continue
 		_label(str(spec.definition.kind).replace("_", " ").to_upper(), Rect2(12, 8, rect.size.x - 24, 18), 11, MUTED, card)
 		_label(spec.short_name if not spec.short_name.is_empty() else spec.display_name, Rect2(12, 30, rect.size.x - 24, 28), 19, TEXT, card)
 		equipment_labels[id] = _label("", Rect2(12, 66, rect.size.x - 24, 25), 13, CYAN, card)
@@ -470,19 +548,15 @@ func _build_workspace() -> void:
 
 
 func _is_cooling_view(id: String) -> bool:
-	var view: Dictionary = ship.definition.view(id)
-	return view.get("kind", "") == "workspace" and view.get("members", []).any(func(member):
-		return ship.components.has(member) and ship.components[member].kind in ["pump", "heat_exchanger", "radiator"])
+	return presenter.workspace_domain(id) == "cooling"
 
 
 func _base_nodes() -> Dictionary:
-	var visible: Dictionary = {}
-	var authored: Dictionary = ship.definition.layouts.get(current_system, {}).get("nodes", {})
-	for id in authored:
-		var spec = ship.definition.component(id)
-		if spec != null and spec.inspectable:
-			visible[id] = authored[id]
+	var visible: Dictionary = _authored_nodes()
 	if ship.definition.view(current_system).get("kind", "") == "workspace":
+		var endpoints: Dictionary = _context_endpoints(visible)
+		for id in endpoints:
+			visible[id] = endpoints[id].rect
 		return visible
 	# Summary departments use the same inspector and a small local connection view.
 	var ids: Array[String] = []
@@ -497,10 +571,53 @@ func _base_nodes() -> Dictionary:
 		visible[ids[i]] = Rect2(266 + (i % 3) * 238, 380 + floori(i / 3.0) * 210, 210, 106)
 	return visible
 
+
+func _authored_nodes() -> Dictionary:
+	var visible: Dictionary = {}
+	var authored: Dictionary = ship.definition.layouts.get(current_system, {}).get("nodes", {})
+	for id in authored:
+		var spec = ship.definition.component(id)
+		if spec != null and spec.inspectable:
+			visible[id] = authored[id]
+	return visible
+
+
+func _context_endpoints(nodes: Dictionary) -> Dictionary:
+	var result: Dictionary = {}
+	if nodes.is_empty() or ship.definition.view(current_system).get("kind", "") != "workspace":
+		return result
+	var cooling: bool = _is_cooling_view(current_system)
+	var rightmost: Rect2 = nodes.values()[0]
+	var top: float = 850.0
+	for rect in nodes.values():
+		if rect.position.x > rightmost.position.x:
+			rightmost = rect
+		top = minf(top, rect.position.y)
+	for edge in presenter.network_connections("cooling" if cooling else "power"):
+		var id: String = edge.from_component if cooling else edge.to_component
+		var neighbor: String = edge.to_component if cooling else edge.from_component
+		if nodes.has(id) or result.has(id) or not nodes.has(neighbor):
+			continue
+		if ship.components[id].kind != ("reactor" if cooling else "engine") or not ship.definition.component(id).inspectable:
+			continue
+		var domain: String = "power" if cooling else "cooling"
+		var destination: String = presenter.workspace_for_domain(id, domain)
+		if destination.is_empty():
+			continue
+		var terminal: Rect2 = Rect2(rightmost.position.x, minf(786, nodes[neighbor].position.y + 120), rightmost.size.x, 64)
+		if cooling:
+			# Put the heat source above its exchanger, so incoming core heat
+			# cannot share the outgoing radiator line and imply a direct link.
+			terminal = Rect2(nodes[neighbor].position.x, top - 1, nodes[neighbor].size.x, 64)
+		result[id] = {"system": destination, "domain": domain, "rect": terminal}
+	return result
+
 func _workspace_nodes() -> Dictionary:
 	var layout: Dictionary = _base_nodes()
 	if layout.is_empty():
 		return layout
+	if not _context_endpoints(_authored_nodes()).is_empty():
+		return _layout_with_endpoints(layout)
 	var first: float = INF
 	var last: float = -INF
 	var base_height: float = 0.0
@@ -522,6 +639,43 @@ func _workspace_nodes() -> Dictionary:
 				rect.position.y += _quick_extra
 			rect.size.y += port_space + (_quick_extra if id == selected_equipment else 0.0)
 		layout[id] = rect
+	return layout
+
+
+func _layout_with_endpoints(layout: Dictionary) -> Dictionary:
+	# Compact cross-workspace terminals share the authored columns. Allocate
+	# each column by actual card height so an expanded control cannot hide a route.
+	var bottom: float = 818.0 if _is_cooling_view(current_system) and ship.bypass_info().supported else 850.0
+	if _quick_extra == 0 and not bypass_mode:
+		var fits: bool = true
+		for id in layout:
+			fits = fits and layout[id].end.y <= bottom
+			for other in layout:
+				if id != other and layout[id].intersects(layout[other]):
+					fits = false
+		if fits:
+			return layout
+	var columns: Dictionary = {}
+	for id in layout:
+		var rect: Rect2 = layout[id]
+		if not columns.has(rect.position.x):
+			columns[rect.position.x] = []
+		columns[rect.position.x].append(id)
+	for ids in columns.values():
+		ids.sort_custom(func(a, b): return layout[a].position.y < layout[b].position.y)
+		var height: float = 0.0
+		for id in ids:
+			var rect: Rect2 = layout[id]
+			rect.size.y += (34.0 if bypass_mode and rect.size.y > 64 else 0.0) + (_quick_extra if id == selected_equipment else 0.0)
+			layout[id] = rect
+			height += rect.size.y
+		var gap: float = maxf(0, (bottom - 360.0 - height) / maxf(1, ids.size() - 1))
+		var y: float = 360.0 if ids.size() > 1 else clampf(layout[ids[0]].position.y, 360, bottom - height)
+		for id in ids:
+			var rect: Rect2 = layout[id]
+			rect.position.y = y
+			layout[id] = rect
+			y += rect.size.y + gap
 	return layout
 
 
@@ -630,9 +784,24 @@ func _build_inspector() -> void:
 	column.add_child(inspector_title)
 	inspector_condition = _text("", 14, GREEN, true)
 	column.add_child(inspector_condition)
+	var workspaces := HBoxContainer.new()
+	column.add_child(workspaces)
+	for destination in presenter.equipment_workspaces(selected_equipment):
+		var button := _new_button(str(destination.name) + " ↗", navigate.bind(str(destination.system), selected_equipment))
+		button.add_theme_font_size_override("font_size", 14)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.disabled = destination.system == current_system
+		button.tooltip_text = "Inspect this equipment in " + str(destination.name)
+		workspaces.add_child(button)
+		workspace_buttons[destination.domain] = button
+	if ship.components[selected_equipment].kind == "load":
+		column.add_child(_text("Electrical service only; no coolant or thermal connection is modeled.", 13, MUTED, true))
 	inspector_controls = EquipmentControls.new()
 	column.add_child(inspector_controls)
-	inspector_controls.configure(ship, presenter, selected_equipment)
+	if spec.inspectable:
+		inspector_controls.configure(ship, presenter, selected_equipment)
+	else:
+		column.add_child(_text("Telemetry only", 13, MUTED))
 	control_widgets = inspector_controls.widgets
 	for widget in control_widgets:
 		if widget.has("slider") and control_slider == null:
@@ -640,7 +809,7 @@ func _build_inspector() -> void:
 			control_value = widget.value
 		elif widget.has("button") and breaker_button == null:
 			breaker_button = widget.button
-	if ship.maintenance_info(selected_equipment).supported:
+	if spec.inspectable and ship.maintenance_info(selected_equipment).supported:
 		column.add_child(HSeparator.new())
 		maintenance_panel = MaintenancePanel.new()
 		column.add_child(maintenance_panel)
@@ -710,9 +879,15 @@ func _refresh() -> void:
 		conditions_label.visible = not condition_button.visible
 		if condition_button.visible:
 			condition_button.text = str(conditions[0].text) + "   •   Inspect ›"
+	elif current_system == "connections":
+		view_description.text = "Complete electrical supply · select equipment to inspect Power" if map_domain == "power" else "Coolant circulation and heat paths · select equipment to inspect Cooling"
+		if is_instance_valid(connection_map):
+			connection_map.refresh()
 	else:
 		var view: Dictionary = ship.definition.view(current_system)
 		view_description.text = str(view.get("description", "Live readings and connections"))
+		if view.get("kind", "") == "workspace":
+			view_description.text = "Circulation / heat paths · arrows: connections · dashed: no transfer" if _is_cooling_view(current_system) else "Electrical supply · arrows: connections · dashed: no delivery"
 		for id in equipment_labels:
 			equipment_labels[id].text = presenter.caption(id)
 			equipment_labels[id].add_theme_color_override("font_color", _equipment_tone(id))
@@ -858,6 +1033,10 @@ func _line(points: PackedVector2Array, color: Color, energized: bool) -> void:
 			draw_line(points[i], points[i + 1], color, 2, true)
 		else:
 			draw_dashed_line(points[i], points[i + 1], DIM, 2, 6, true)
+	if points.size() > 1:
+		var direction: Vector2 = (points[-1] - points[-2]).normalized()
+		var tip: Vector2 = points[-1] - direction * 3
+		draw_colored_polygon(PackedVector2Array([tip, tip - direction * 9 + direction.orthogonal() * 4, tip - direction * 9 - direction.orthogonal() * 4]), color if energized else DIM)
 	if energized:
 		var segment: int = int(ship.elapsed) % (points.size() - 1)
 		draw_circle(points[segment].lerp(points[segment + 1], fmod(ship.elapsed, 1.0)), 3, TEXT)
@@ -867,14 +1046,14 @@ func _draw() -> void:
 	draw_rect(Rect2(0, 0, 1440, 900), INK)
 	if not ship.validation_errors.is_empty():
 		return
-	if current_system == "overview":
+	if current_system in ["overview", "connections"]:
 		return
 	draw_style_box(_style(Color("0c1a25")), Rect2(244, 350, 732, 520))
 	for x in range(258, 968, 24):
 		for y in range(360, 860, 24):
 			draw_circle(Vector2(x, y), 0.7, Color("1e3443"))
 	var layout: Dictionary = _workspace_nodes()
-	for edge in presenter.schematic_edges(layout.keys()):
+	for edge in _schematic_edges(layout):
 		var points: PackedVector2Array = _route_edge(layout[edge.from_component], layout[edge.to_component], layout)
 		_line(points, GREEN if edge.get("bypass", false) else (AMBER if edge.domain == "thermal" else CYAN), edge.active)
 
@@ -894,7 +1073,7 @@ func _gui_input(event: InputEvent) -> void:
 	if not _is_cooling_view(current_system) or not ship.bypass_info().installed:
 		return
 	var layout: Dictionary = _workspace_nodes()
-	for edge in presenter.schematic_edges(layout.keys()):
+	for edge in _schematic_edges(layout):
 		if not edge.get("bypass", false):
 			continue
 		var path: PackedVector2Array = _route_edge(layout[edge.from_component], layout[edge.to_component], layout)
@@ -905,7 +1084,23 @@ func _gui_input(event: InputEvent) -> void:
 				return
 
 
+func _schematic_edges(layout: Dictionary) -> Array[Dictionary]:
+	var edges: Array[Dictionary] = presenter.schematic_edges(layout.keys())
+	var domain: String = presenter.workspace_domain(current_system)
+	if domain == "power":
+		return edges.filter(func(edge): return edge.domain == "power")
+	if domain == "cooling":
+		return edges.filter(func(edge): return edge.domain in ["coolant", "thermal"])
+	return edges
+
+
 func _route_edge(source: Rect2, destination: Rect2, layout: Dictionary) -> PackedVector2Array:
+	if is_equal_approx(source.get_center().x, destination.get_center().x):
+		var downward: bool = source.position.y < destination.position.y
+		var vertical := PackedVector2Array([Vector2(source.get_center().x, source.end.y if downward else source.position.y),
+			Vector2(destination.get_center().x, destination.position.y if downward else destination.end.y)])
+		if _route_is_clear(vertical, source, destination, layout):
+			return vertical
 	# Connect to the machinery readings, not to the middle of expanded controls.
 	var start: Vector2 = Vector2(source.get_center().x, source.position.y + minf(53.0, source.size.y * 0.5))
 	var finish: Vector2 = Vector2(destination.get_center().x, destination.position.y + minf(53.0, destination.size.y * 0.5))
@@ -914,16 +1109,25 @@ func _route_edge(source: Rect2, destination: Rect2, layout: Dictionary) -> Packe
 	finish.x = destination.position.x if forward else destination.end.x
 	var middle_x: float = (start.x + finish.x) * 0.5
 	var points := PackedVector2Array([start, Vector2(middle_x, start.y), Vector2(middle_x, finish.y), finish])
-	for rect in layout.values():
-		if rect == source or rect == destination:
-			continue
-		if _route_intersects(points, rect.grow(8)):
-			var use_top: bool = (source.get_center().y + destination.get_center().y) * 0.5 < 575
-			var lane: float = 356 if use_top else 862
-			var source_edge: Vector2 = Vector2(source.get_center().x, source.position.y if use_top else source.end.y)
-			var destination_edge: Vector2 = Vector2(destination.get_center().x, destination.position.y if use_top else destination.end.y)
-			return PackedVector2Array([source_edge, Vector2(source_edge.x, lane), Vector2(destination_edge.x, lane), destination_edge])
+	if _route_is_clear(points, source, destination, layout):
+		return points
+	# Leave by the side of each card before using an outer lane. A vertical
+	# departure from its centre would pass through other cards in that column.
+	var lanes: Array = [356.0, 862.0] if (start.y + finish.y) * 0.5 < 575 else [862.0, 356.0]
+	for lane in lanes:
+		var departure: float = start.x + (10.0 if forward else -10.0)
+		var arrival: float = finish.x + (-10.0 if forward else 10.0)
+		var candidate := PackedVector2Array([start, Vector2(departure, start.y), Vector2(departure, lane), Vector2(arrival, lane), Vector2(arrival, finish.y), finish])
+		if _route_is_clear(candidate, source, destination, layout):
+			return candidate
 	return points
+
+
+func _route_is_clear(points: PackedVector2Array, source: Rect2, destination: Rect2, layout: Dictionary) -> bool:
+	for rect in layout.values():
+		if rect != source and rect != destination and _route_intersects(points, rect.grow(4)):
+			return false
+	return true
 
 
 func _route_intersects(points: PackedVector2Array, rect: Rect2) -> bool:

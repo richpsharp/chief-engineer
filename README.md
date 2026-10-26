@@ -2,7 +2,7 @@
 
 A Godot prototype for exploring operating starships through their engineering systems. Kestrel and Tern start healthy and run continuously. Change a setting, follow its effects through connected equipment, and restore the ship to normal operation.
 
-The overview presents eight ship systems: Reactor, Power, Propulsion, Cooling, Life support, Radiation protection, Sensors, and Hull & compartments. **Power** and **Cooling** have detailed network workspaces. The other departments open a local equipment/connection view with the same inspector and any available controls; they do not yet have the same depth of simulation.
+The overview presents eight ship systems: Reactor, Power, Propulsion, Cooling, Life support, Radiation protection, Sensors, and Hull & compartments. **Power** and **Cooling** have detailed operating workspaces. **Connections** shows the whole ship's electrical and cooling relationships and opens equipment in the matching workspace. The other departments open a local equipment/connection view with the same inspector and any available controls; they do not yet have the same depth of simulation.
 
 ## Play
 
@@ -19,9 +19,11 @@ The project uses the Compatibility renderer. The portable engine is a local conv
 ## Explore the ship
 
 - Use the **Ship** selector at the top to switch between **Kestrel** and **Tern**. Each keeps its settings, operating state, and pause state for this session; only the selected ship advances. Switching returns to its overview.
-- The sidebar contains **Ship overview**, **Power**, and **Cooling**. Open other departments from their overview cards. **Reactor**, for example, selects the reactor and exposes its controls immediately.
+- The sidebar contains **Ship overview**, **Connections**, **Power**, and **Cooling**. Open other departments from their overview cards. **Reactor**, for example, selects the reactor and exposes its controls immediately.
+- Open **Connections** to trace the full network. Its **Power** layer shows the reactor, intermediate buses, engines, pumps, and service loads. Its **Cooling** layer shows circulation and heat transfer, including the reactor, exchanger, shared coolant, engines, and radiator. Clicking a component opens it in the layer's operating workspace; **Back** restores the map and its focus.
 - Select equipment in the diagram to see operating controls on its selected block and in the inspector. Both control the same machinery and show committed settings.
-- Equipment selection and dependency links keep the current view. Selecting pump B in Power no longer sends you to Cooling; use the workspace buttons when you want a different network view.
+- Ordinary equipment selection and dependency links keep the current view. Selecting pump B in Power does not send you to Cooling. The inspector's explicit **Power** and **Cooling** shortcuts retain the selected equipment while changing networks. **Connections ↗** opens the whole-ship map with that equipment highlighted.
+- Compact endpoints expose engines in the operating Power schematic and the reactor in Cooling. Their labelled destination links open the related operating workspace without issuing a machinery command.
 - The workspace equipment list also opens equipment that has no schematic placement or connections.
 - Use the breadcrumbs or **Back** to move between the overview, workspaces, and equipment.
 - Follow **Connected equipment** links to inspect dependencies in place. A cooling problem may originate in an electrical feeder, whose controls are available in the same inspector.
@@ -32,6 +34,8 @@ The project uses the Compatibility renderer. The portable engine is a local conv
 Press **P** to pause or resume. **Escape** leaves bypass editing or collapses expanded service details first; otherwise it goes back.
 
 There is no countdown, win condition, or loss screen. Leaving the initial controls alone keeps the ship running normally. Equipment performance and recovery evolve over time as you experiment.
+
+The connection map distinguishes electrical supply, coolant circulation, heat transfer, and fitted bypasses. Inactive physical connections remain visible. Direction markers describe the authored connection relationship; heat can reverse as temperatures change. Life support currently has an electrical load only, so it appears in Power without an invented connection to the exchanger. Its map entry opens read-only power telemetry. The shared coolant similarly exposes its own temperature without adding a control that the model does not have.
 
 | Ship | Engines at cruise | Buses / pumps | Cruise draw / capacity |
 | --- | --- | --- | --- |
@@ -137,6 +141,7 @@ The lifetime distinction is inspired by [bearing life ratings](https://www.jtekt
 - `scripts/simulation/maintenance_model.gd` owns operating history, pump wear and failure risk, repair supplies, and maintenance jobs.
 - `scripts/simulation/coolant_bypass.gd` owns circuit isolation, the installed route, finite flow allocation, kit inventory, and installation/removal work. `scripts/presentation/coolant_bypass_panel.gd` presents its controls and prerequisites.
 - `scripts/presentation/ship_presenter.gd` turns numerical runtime readings into labels, status explanations, conditions, and dependency links.
+- `scripts/presentation/connection_map.gd` lays out the complete runtime graph by domain, including read-only service loads and shared coolant. It emits inspection requests; it never commands or advances equipment.
 - `scripts/presentation/equipment_controls.gd` supplies the same addressed controls to selected schematic blocks and inspectors. `maintenance_panel.gd` is an inline repair section with expandable history/charts; `coolant_bypass_panel.gd` is the connection inspector.
 - `scripts/main.gd` builds the interface from the ship's view and equipment metadata. Controls send addressed commands; they do not directly change physical state.
 - `tests/test_simulation.gd` checks the simulation rules.
@@ -149,6 +154,7 @@ The lifetime distinction is inspired by [bearing life ratings](https://www.jtekt
 - `tests/test_maintenance.gd` checks lifetime accounting, wear, repair safety, and repeatable failures. `tests/test_maintenance_interface.gd` exercises inline repair, expanded service-life details, and narrow chart/value layouts.
 - `tests/test_coolant_bypass.gd` checks installation, isolation, shared flow, donor limits, job conflicts, restoration, inventory, and independent runtime state. `tests/test_bypass_interface.gd` performs the complete pump A/B repair loop through the player controls and checks live schematic links.
 - `tests/test_console_consistency.gd` checks direct department inspection, selection without view changes, synchronized node/inspector controls, input handling, and equipment/control geometry on both ships.
+- `tests/test_connection_map_model.gd` checks domain-aware network data and navigation, including renamed definitions and changing bypass topology. `tests/test_connection_navigation.gd` checks pointer/keyboard map navigation, Back context, read-only telemetry, live connection activity, and both ships' map geometry.
 
 ### Components, ports, and assemblies
 
@@ -193,6 +199,8 @@ godot --headless --path . --script tests/test_coolant_bypass.gd
 godot --headless --path . --script tests/test_bypass_interface.gd
 godot --headless --path . --script tests/test_interface.gd
 godot --headless --path . --script tests/test_console_consistency.gd
+godot --headless --path . --script tests/test_connection_map_model.gd
+godot --headless --path . --script tests/test_connection_navigation.gd
 godot --headless --path . --quit-after 3
 ```
 
