@@ -6,6 +6,7 @@ const Presenter = preload("res://scripts/presentation/ship_presenter.gd")
 const ShipCatalog = preload("res://scripts/ship_catalog.gd")
 const MaintenancePanel = preload("res://scripts/presentation/maintenance_panel.gd")
 const CoolantBypassPanel = preload("res://scripts/presentation/coolant_bypass_panel.gd")
+const EquipmentControls = preload("res://scripts/presentation/equipment_controls.gd")
 const INK = Color("08121c")
 const PANEL = Color("101f2c")
 const BORDER = Color("294050")
@@ -42,11 +43,19 @@ var control_value: Label
 var control_widgets: Array[Dictionary] = []
 var inspector_title: Label
 var inspector_condition: Label
+var inspector_close_button: Button
 var maintenance_button: Button
 var maintenance_panel: Control
 var bypass_button: Button
 var bypass_panel: Control
 var _bypass_choices: Dictionary = {}
+var inspector_controls
+var quick_controls
+var bypass_mode: bool = false
+var inspector_mode: String = "equipment"
+var coupling_buttons: Dictionary = {}
+var route_button: Button
+var _quick_extra: float = 0.0
 var reading_rows: Array = []
 var supply_label: Label
 var cooling_label: Label
@@ -107,8 +116,9 @@ func select_ship(ship_id: String) -> bool:
 
 
 func _build_console() -> void:
-	close_maintenance()
-	close_bypass()
+	_release_inspector()
+	bypass_mode = false
+	inspector_mode = "equipment"
 	_clear(self)
 	nav_buttons.clear()
 	get_window().title = "Chief Engineer / " + ship.definition.display_name
@@ -242,13 +252,6 @@ func _build_shell() -> void:
 			continue
 		_add_navigation(view, y)
 		y += 54
-	_label("SYSTEM STATUS", Rect2(40, y + 17, 168, 22), 12, MUTED, self)
-	y += 50
-	for view in ship.definition.views:
-		if view.get("kind", "") == "workspace":
-			continue
-		_add_navigation(view, y)
-		y += 50
 	_button("Engineering log", Rect2(36, 810, 172, 42), _show_log, self).add_theme_font_size_override("font_size", 15)
 	_panel(Rect2(244, 128, 1164, 74), self)
 	_label("ELECTRICAL SUPPLY", Rect2(262, 138, 345, 20), 12, MUTED, self)
@@ -294,17 +297,38 @@ func navigate(system: String, equipment: String = "") -> void:
 		var spec = ship.definition.component(equipment)
 		if spec == null or not spec.inspectable:
 			return
-		if view.get("kind", "") != "workspace" or equipment not in view.get("members", []):
-			system = ship.definition.workspace_for(equipment)
-			if system.is_empty():
-				return
-	if current_system == system and selected_equipment == equipment:
+	elif system != "overview" and view.get("kind", "") != "workspace":
+		for id in view.get("members", []):
+			var spec = ship.definition.component(id)
+			if spec != null and spec.inspectable:
+				equipment = id
+				break
+	if current_system == system and selected_equipment == equipment and inspector_mode == "equipment":
 		return
 	history.append({"system": current_system, "equipment": selected_equipment})
 	if history.size() > 32:
 		history.pop_front()
+	if current_system != system:
+		bypass_mode = false
 	current_system = system
 	selected_equipment = equipment
+	inspector_mode = "equipment"
+	_build_view()
+	_refresh()
+
+
+func select_equipment(equipment: String) -> void:
+	navigate(current_system, equipment)
+
+
+func _deselect_equipment() -> void:
+	if selected_equipment.is_empty():
+		return
+	history.append({"system": current_system, "equipment": selected_equipment})
+	if history.size() > 32:
+		history.pop_front()
+	selected_equipment = ""
+	inspector_mode = "equipment"
 	_build_view()
 	_refresh()
 
@@ -312,6 +336,8 @@ func _back() -> void:
 	if history.is_empty():
 		return
 	var previous: Dictionary = history.pop_back()
+	bypass_mode = false
+	inspector_mode = "equipment"
 	current_system = previous.system
 	selected_equipment = previous.equipment
 	_build_view()
@@ -325,8 +351,7 @@ func _clear(parent: Node) -> void:
 
 
 func _build_view() -> void:
-	close_maintenance()
-	close_bypass()
+	_release_inspector()
 	_clear(workspace_layer)
 	_clear(breadcrumb_layer)
 	overview_buttons.clear()
@@ -339,11 +364,17 @@ func _build_view() -> void:
 	_dependency_links.clear()
 	reading_rows.clear()
 	control_widgets.clear()
+	coupling_buttons.clear()
+	quick_controls = null
+	inspector_controls = null
+	route_button = null
+	_quick_extra = 0.0
 	control_slider = null
 	control_value = null
 	breaker_button = null
 	inspector_title = null
 	inspector_condition = null
+	inspector_close_button = null
 	maintenance_button = null
 	bypass_button = null
 	summary_value = null
@@ -356,7 +387,9 @@ func _build_view() -> void:
 	var view: Dictionary = ship.definition.view(current_system)
 	if current_system != "overview":
 		_button(str(view.name), Rect2(484, 218, 204, 30), navigate.bind(current_system, ""), breadcrumb_layer).add_theme_font_size_override("font_size", 14)
-	if not selected_equipment.is_empty():
+	if inspector_mode == "bypass":
+		_label("›  Coolant bypass", Rect2(704, 218, 700, 30), 14, MUTED, breadcrumb_layer)
+	elif not selected_equipment.is_empty():
 		_label("›  " + ship.definition.component(selected_equipment).display_name, Rect2(704, 218, 700, 30), 14, MUTED, breadcrumb_layer)
 	for id in nav_buttons:
 		nav_buttons[id].add_theme_stylebox_override("normal", _style(Color("214452") if id == current_system else Color("152735"), CYAN if id == current_system else BORDER))
@@ -364,10 +397,8 @@ func _build_view() -> void:
 	view_description = _label("", Rect2(246, 313, 720, 28), 16, MUTED, workspace_layer)
 	if current_system == "overview":
 		_build_overview()
-	elif view.get("kind", "") == "workspace":
-		_build_workspace()
 	else:
-		_build_summary()
+		_build_workspace()
 	queue_redraw()
 
 func _build_overview() -> void:
@@ -392,105 +423,232 @@ func _build_overview() -> void:
 	condition_button.add_theme_font_size_override("font_size", 15)
 
 func _build_workspace() -> void:
-	var has_coolant_members: bool = ship.definition.view(current_system).get("members", []).any(func(id):
-		return ship.components.has(id) and ship.components[id].kind in ["pump", "heat_exchanger", "radiator"])
-	if has_coolant_members and ship.bypass_info().supported:
+	var view: Dictionary = ship.definition.view(current_system)
+	var coolant_view: bool = _is_cooling_view(current_system)
+	if coolant_view and ship.bypass_info().supported:
 		view_title.size.x = 440
-		bypass_button = _button("Coolant bypass kit ›", Rect2(718, 272, 250, 34), open_bypass, workspace_layer)
+		bypass_button = _button("Install / inspect bypass", Rect2(718, 272, 250, 34), open_bypass, workspace_layer)
 		bypass_button.add_theme_font_size_override("font_size", 15)
+	if not selected_equipment.is_empty() and _base_nodes().has(selected_equipment):
+		quick_controls = EquipmentControls.new()
+		workspace_layer.add_child(quick_controls)
+		quick_controls.configure(ship, presenter, selected_equipment, true)
+		_quick_extra = quick_controls.get_combined_minimum_size().y + 10.0
+		if _quick_extra <= 10.0:
+			quick_controls.queue_free()
+			quick_controls = null
+			_quick_extra = 0.0
 	var layout: Dictionary = _workspace_nodes()
 	for id in layout:
 		var spec = ship.definition.component(id)
 		var rect: Rect2 = layout[id]
-		var card := _button("", rect, navigate.bind(current_system, str(id)), workspace_layer)
-		card.tooltip_text = "Inspect " + spec.display_name
+		# Selection is separate from controls; pressing the card never actuates it.
+		var card := _button("", rect, select_equipment.bind(str(id)), workspace_layer)
+		card.tooltip_text = "Inspect " + spec.display_name + " in this view"
 		if id == selected_equipment:
 			card.add_theme_stylebox_override("normal", _style(Color("214452"), CYAN, 2))
 		equipment_buttons[id] = card
-		var caption_text: String = str(spec.definition.kind).replace("_", " ").to_upper()
-		var target: String = ship.definition.workspace_for(id)
-		if id not in ship.definition.view(current_system).get("members", []) and not target.is_empty():
-			caption_text = str(ship.definition.view(target).get("name", caption_text)).to_upper() + " ↗"
-		_label(caption_text, Rect2(12, 8, rect.size.x - 24, 18), 11, MUTED, card)
-		_label(spec.short_name if not spec.short_name.is_empty() else spec.display_name, Rect2(12, 30, rect.size.x - 24, 28), 20, TEXT, card)
-		equipment_labels[id] = _label("", Rect2(12, 66, rect.size.x - 24, 25), 14, CYAN, card)
-	_label(str(ship.definition.view(current_system).get("detail", "")), Rect2(266, 813, 690, 42), 15, MUTED, workspace_layer, true)
+		_label(str(spec.definition.kind).replace("_", " ").to_upper(), Rect2(12, 8, rect.size.x - 24, 18), 11, MUTED, card)
+		_label(spec.short_name if not spec.short_name.is_empty() else spec.display_name, Rect2(12, 30, rect.size.x - 24, 28), 19, TEXT, card)
+		equipment_labels[id] = _label("", Rect2(12, 66, rect.size.x - 24, 25), 13, CYAN, card)
+		if id == selected_equipment and is_instance_valid(quick_controls):
+			quick_controls.reparent(card)
+			quick_controls.position = Vector2(8, 100)
+			quick_controls.size.x = rect.size.x - 16
+		if bypass_mode:
+			_add_coupling(id, card, rect)
+	if view.get("kind", "") != "workspace":
+		summary_value = _label("", Rect2(246, 315, 310, 26), 16, CYAN, workspace_layer)
+		summary_state = _label("", Rect2(566, 315, 400, 26), 15, GREEN, workspace_layer)
+		summary_detail = view_description
+		view_description.hide()
 	_build_inspector()
+	if coolant_view and ship.bypass_info().supported:
+		route_button = _button("", Rect2(440, 830, 330, 32), open_bypass, workspace_layer)
+		route_button.add_theme_font_size_override("font_size", 13)
+	_refresh_couplings()
 
 
-func _workspace_nodes() -> Dictionary:
-	# Cards, connection endpoints, and routing obstacles share one visible layout.
+func _is_cooling_view(id: String) -> bool:
+	var view: Dictionary = ship.definition.view(id)
+	return view.get("kind", "") == "workspace" and view.get("members", []).any(func(member):
+		return ship.components.has(member) and ship.components[member].kind in ["pump", "heat_exchanger", "radiator"])
+
+
+func _base_nodes() -> Dictionary:
 	var visible: Dictionary = {}
 	var authored: Dictionary = ship.definition.layouts.get(current_system, {}).get("nodes", {})
 	for id in authored:
 		var spec = ship.definition.component(id)
 		if spec != null and spec.inspectable:
 			visible[id] = authored[id]
+	if ship.definition.view(current_system).get("kind", "") == "workspace":
+		return visible
+	# Summary departments use the same inspector and a small local connection view.
+	var ids: Array[String] = []
+	for member in ship.definition.view(current_system).get("members", []):
+		var spec = ship.definition.component(member)
+		if spec != null and spec.inspectable and member not in ids:
+			ids.append(member)
+		for link in presenter.links(member):
+			if link.equipment not in ids:
+				ids.append(link.equipment)
+	for i in mini(ids.size(), 6):
+		visible[ids[i]] = Rect2(266 + (i % 3) * 238, 380 + floori(i / 3.0) * 210, 210, 106)
 	return visible
+
+func _workspace_nodes() -> Dictionary:
+	var layout: Dictionary = _base_nodes()
+	if layout.is_empty():
+		return layout
+	var first: float = INF
+	var last: float = -INF
+	var base_height: float = 0.0
+	for rect in layout.values():
+		first = minf(first, rect.position.y)
+		last = maxf(last, rect.position.y)
+		base_height = maxf(base_height, rect.size.y)
+	var port_space: float = 34.0 if bypass_mode else 0.0
+	var selected_y: float = layout[selected_equipment].position.y if layout.has(selected_equipment) else INF
+	# Reserve room for the selected card's controls; preserve authored columns
+	# and row order, with connections routed against the same expanded geometry.
+	var bottom: float = (818.0 if _is_cooling_view(current_system) and ship.bypass_info().supported else 850.0) - base_height - port_space - _quick_extra
+	for id in layout:
+		var rect: Rect2 = layout[id]
+		if _quick_extra > 0.0 or port_space > 0.0:
+			var original_y: float = rect.position.y
+			rect.position.y = lerpf(360.0, maxf(360.0, bottom), (original_y - first) / maxf(1.0, last - first))
+			if original_y > selected_y:
+				rect.position.y += _quick_extra
+			rect.size.y += port_space + (_quick_extra if id == selected_equipment else 0.0)
+		layout[id] = rect
+	return layout
+
+
+func _add_coupling(id: String, card: Button, rect: Rect2) -> void:
+	var info: Dictionary = ship.bypass_info()
+	for pump in info.pumps:
+		if pump.id == id:
+			var button := _coupling_button("Outlet coupling", _choose_coupling.bind("source", id), card, rect)
+			coupling_buttons["source:" + id] = button
+	for circuit in info.circuits:
+		if circuit.service_component == id:
+			var button := _coupling_button("Circuit coupling", _choose_coupling.bind("target", str(circuit.id)), card, rect)
+			coupling_buttons["target:" + str(circuit.id)] = button
+
+
+func _coupling_button(label: String, callback: Callable, card: Button, rect: Rect2) -> Button:
+	var button := _new_button(label, callback)
+	button.add_theme_font_size_override("font_size", 12)
+	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
+		var box: StyleBoxFlat = button.get_theme_stylebox(state).duplicate()
+		box.content_margin_top = 3
+		box.content_margin_bottom = 3
+		button.add_theme_stylebox_override(state, box)
+	_place(button, Rect2(8, rect.size.y - 30, rect.size.x - 16, 26), card)
+	return button
+
+
+func _choose_coupling(kind: String, id: String) -> void:
+	if inspector_mode != "bypass":
+		open_bypass()
+	if not is_instance_valid(bypass_panel):
+		return
+	if kind == "source":
+		bypass_panel.set_source(id)
+	else:
+		bypass_panel.set_target(id)
+
+
+func _refresh_couplings() -> void:
+	var info: Dictionary = ship.bypass_info()
+	var choices: Dictionary = _bypass_choices.get(ship.definition.id, {})
+	for key in coupling_buttons:
+		var button: Button = coupling_buttons[key]
+		button.disabled = ship.paused or info.installed or not str(info.job).is_empty()
+		if str(key).begins_with("target:"):
+			for circuit in info.circuits:
+				if key == "target:" + str(circuit.id):
+					button.disabled = button.disabled or str(choices.get("source_id", "")).is_empty() or circuit.pump == choices.get("source_id")
+	if is_instance_valid(route_button):
+		route_button.visible = info.installed or (bypass_mode and not str(choices.get("source_id", "")).is_empty() and not str(choices.get("circuit_id", "")).is_empty())
+		route_button.text = "Bypass: %.1f / %.1f L/s · %s" % [info.delivered_flow, info.capacity, "OPEN" if info.open else "CLOSED"] if info.installed else "Proposed bypass · inspect / fit"
+		# Place the connection's selectable badge in a free route lane.
+		if route_button.visible:
+			route_button.position = Vector2(440, 833)
 
 func _build_inspector() -> void:
 	_panel(Rect2(990, 264, 418, 606), workspace_layer)
-	if selected_equipment == "":
-		_label("EQUIPMENT INSPECTOR", Rect2(1010, 282, 370, 25), 12, MUTED, workspace_layer)
-		_label("Workspace equipment", Rect2(1010, 324, 370, 45), 25, TEXT, workspace_layer)
-		_label("Select equipment here or on the schematic to inspect its readings and controls.", Rect2(1010, 386, 365, 72), 18, MUTED, workspace_layer, true)
-		var equipment_scroll := ScrollContainer.new()
-		equipment_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-		equipment_scroll.follow_focus = true
-		_place(equipment_scroll, Rect2(1010, 476, 365, 300), workspace_layer)
-		var equipment_column := VBoxContainer.new()
-		equipment_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		equipment_column.add_theme_constant_override("separation", 8)
-		equipment_scroll.add_child(equipment_column)
-		for id in ship.definition.view(current_system).get("members", []):
-			var member = ship.definition.component(id)
-			if member == null or not member.inspectable or equipment_list_buttons.has(id):
-				continue
-			var button := _new_button(member.display_name + "  ›", navigate.bind(current_system, str(id)))
-			button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-			button.clip_text = true
-			button.tooltip_text = member.display_name
-			button.custom_minimum_size.y = 42
-			equipment_column.add_child(button)
-			equipment_list_buttons[id] = button
-		if equipment_list_buttons.is_empty():
-			equipment_column.add_child(_text("No inspectable equipment in this workspace.", 16, MUTED, true))
-		_label("Back retraces your route. Pause freezes the simulation while you explore.", Rect2(1010, 795, 365, 60), 15, MUTED, workspace_layer, true)
-		return
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.follow_focus = true
 	_place(scroll, Rect2(1008, 279, 382, 572), workspace_layer)
 	var column := VBoxContainer.new()
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	column.add_theme_constant_override("separation", 5)
+	column.add_theme_constant_override("separation", 8)
 	scroll.add_child(column)
+	if inspector_mode == "bypass":
+		bypass_panel = CoolantBypassPanel.new()
+		column.add_child(bypass_panel)
+		bypass_panel.close_requested.connect(close_bypass)
+		bypass_panel.inspect_requested.connect(_inspect_bypass_equipment)
+		bypass_panel.selection_changed.connect(_bypass_selection_changed)
+		bypass_panel.configure(ship, presenter, _bypass_choices.get(ship.definition.id, {}))
+		_bypass_choices[ship.definition.id] = bypass_panel.selected_endpoints()
+		return
+	if selected_equipment.is_empty():
+		column.add_child(_text("EQUIPMENT", 12, MUTED))
+		column.add_child(_text("Select equipment", 24, TEXT, true))
+		column.add_child(_text("Select a diagram block or an entry below. Its controls stay in this view.", 14, MUTED, true))
+		var ids: Array = ship.definition.view(current_system).get("members", []).duplicate()
+		for id in _base_nodes():
+			if id not in ids:
+				ids.append(id)
+		for id in ids:
+			var member = ship.definition.component(id)
+			if member == null or not member.inspectable or equipment_list_buttons.has(id):
+				continue
+			var button := _new_button(member.display_name, select_equipment.bind(str(id)))
+			button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			button.clip_text = true
+			button.tooltip_text = member.display_name
+			button.custom_minimum_size.y = 40
+			column.add_child(button)
+			equipment_list_buttons[id] = button
+		if equipment_list_buttons.is_empty():
+			column.add_child(_text("No inspectable equipment in this department.", 14, MUTED, true))
+		return
 	var heading := HBoxContainer.new()
 	column.add_child(heading)
-	var tag := _text("EQUIPMENT INSPECTOR", 12, MUTED)
+	var tag := _text("EQUIPMENT · " + str(ship.definition.view(current_system).get("name", "")), 12, MUTED)
 	tag.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading.add_child(tag)
-	var close_button := _new_button("×", navigate.bind(current_system, ""))
-	var close_style := _style(Color("152d3b"))
-	close_style.content_margin_top = 1
-	close_style.content_margin_bottom = 1
-	close_button.add_theme_stylebox_override("normal", close_style)
-	close_button.add_theme_font_size_override("font_size", 14)
-	heading.add_child(close_button)
+	inspector_close_button = _new_button("×", _deselect_equipment)
+	heading.add_child(inspector_close_button)
 	var spec = ship.definition.component(selected_equipment)
 	inspector_title = _text(spec.display_name, 25, TEXT, true)
 	column.add_child(inspector_title)
-	var context: String = presenter.assembly_context(selected_equipment)
-	if not context.is_empty():
-		column.add_child(_text(context, 12, CYAN, true))
-	column.add_child(_text(spec.description, 14, MUTED, true))
 	inspector_condition = _text("", 14, GREEN, true)
 	column.add_child(inspector_condition)
-	maintenance_button = _new_button("Service life & maintenance ›", open_maintenance.bind(selected_equipment))
-	maintenance_button.add_theme_font_size_override("font_size", 14)
-	maintenance_button.custom_minimum_size.y = 36
-	column.add_child(maintenance_button)
+	inspector_controls = EquipmentControls.new()
+	column.add_child(inspector_controls)
+	inspector_controls.configure(ship, presenter, selected_equipment)
+	control_widgets = inspector_controls.widgets
+	for widget in control_widgets:
+		if widget.has("slider") and control_slider == null:
+			control_slider = widget.slider
+			control_value = widget.value
+		elif widget.has("button") and breaker_button == null:
+			breaker_button = widget.button
+	if ship.maintenance_info(selected_equipment).supported:
+		column.add_child(HSeparator.new())
+		maintenance_panel = MaintenancePanel.new()
+		column.add_child(maintenance_panel)
+		maintenance_panel.inspect_requested.connect(_inspect_maintenance_supply)
+		maintenance_panel.configure(ship, presenter, selected_equipment)
+		maintenance_button = maintenance_panel.details_button
 	column.add_child(HSeparator.new())
+	column.add_child(_text("LIVE READINGS", 12, MUTED))
 	for reading in presenter.readings(selected_equipment):
 		var row := HBoxContainer.new()
 		column.add_child(row)
@@ -500,45 +658,12 @@ func _build_inspector() -> void:
 		var value := _text(str(reading[1]), 14, TEXT)
 		row.add_child(value)
 		reading_rows.append({"key": key, "value": value})
-	for descriptor in spec.controls():
-		column.add_child(HSeparator.new())
-		var action: String = str(descriptor.id)
-		if descriptor.get("kind", "") == "toggle":
-			var toggle := _new_button("", _toggle_control.bind(action))
-			toggle.add_theme_font_size_override("font_size", 14)
-			toggle.custom_minimum_size.y = 34
-			column.add_child(toggle)
-			control_widgets.append({"descriptor": descriptor, "button": toggle})
-			if breaker_button == null:
-				breaker_button = toggle
-		else:
-			var control_heading := HBoxContainer.new()
-			column.add_child(control_heading)
-			var control_name := _text(str(descriptor.label), 14, MUTED)
-			control_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			control_heading.add_child(control_name)
-			var value_label := _text("", 16, CYAN)
-			control_heading.add_child(value_label)
-			var slider := HSlider.new()
-			slider.min_value = float(descriptor.get("min", 0))
-			slider.max_value = float(descriptor.get("max", 100))
-			slider.step = float(descriptor.get("step", 1))
-			slider.custom_minimum_size = Vector2(0, 26)
-			slider.tooltip_text = str(descriptor.label)
-			if spec.definition.kind == "pump" and action == "flow":
-				slider.tooltip_text = "Nominal flow request. Wear reduces delivered flow; increasing this setting uses more power and can accelerate wear."
-			slider.value_changed.connect(_change_control.bind(action))
-			column.add_child(slider)
-			control_widgets.append({"descriptor": descriptor, "slider": slider, "value": value_label})
-			if control_slider == null:
-				control_slider = slider
-				control_value = value_label
+	column.add_child(_text(spec.description, 13, MUTED, true))
 	column.add_child(HSeparator.new())
 	column.add_child(_text("CONNECTED EQUIPMENT", 12, MUTED))
 	_dependency_container = VBoxContainer.new()
 	column.add_child(_dependency_container)
 	_refresh_dependency_links(true)
-
 
 func _refresh_dependency_links(force: bool = false) -> void:
 	if not is_instance_valid(_dependency_container) or selected_equipment.is_empty():
@@ -552,47 +677,11 @@ func _refresh_dependency_links(force: bool = false) -> void:
 	if connected.is_empty():
 		_dependency_container.add_child(_text("No active connections", 14, MUTED))
 	for link in connected:
-		var button := _new_button(link.label + "  ›", navigate.bind(link.system, link.equipment))
+		var button := _new_button(link.label + "  ›", select_equipment.bind(str(link.equipment)))
 		button.add_theme_font_size_override("font_size", 14)
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.custom_minimum_size.y = 32
 		_dependency_container.add_child(button)
-		dependency_buttons.append(button)
-
-func _build_summary() -> void:
-	_panel(Rect2(244, 356, 1164, 454), workspace_layer)
-	_label("SYSTEM STATUS", Rect2(270, 378, 1000, 24), 13, MUTED, workspace_layer)
-	summary_value = _label("", Rect2(270, 420, 1000, 60), 38, TEXT, workspace_layer)
-	summary_state = _label("", Rect2(270, 494, 1000, 30), 20, GREEN, workspace_layer)
-	summary_detail = _label("", Rect2(270, 544, 1050, 62), 18, MUTED, workspace_layer, true)
-	var targets: Array[Dictionary] = []
-	var seen: Dictionary = {}
-	for id in ship.definition.view(current_system).get("members", []):
-		var spec = ship.definition.component(id)
-		var workspace: String = ship.definition.workspace_for(id)
-		if spec != null and spec.inspectable and not workspace.is_empty() and not seen.has(id):
-			targets.append({"system": workspace, "equipment": id, "label": "Inspect " + spec.short_name})
-			seen[id] = true
-		for link in presenter.links(id):
-			if not seen.has(link.equipment):
-				targets.append(link)
-				seen[link.equipment] = true
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.follow_focus = true
-	_place(scroll, Rect2(270, 644, 1100, 140), workspace_layer)
-	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	grid.add_theme_constant_override("h_separation", 16)
-	grid.add_theme_constant_override("v_separation", 10)
-	scroll.add_child(grid)
-	for link in targets:
-		var button := _new_button(link.label + "  ›", navigate.bind(link.system, link.equipment))
-		button.custom_minimum_size = Vector2(520, 44)
-		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		button.add_theme_font_size_override("font_size", 16)
-		grid.add_child(button)
 		dependency_buttons.append(button)
 
 func _refresh() -> void:
@@ -607,7 +696,7 @@ func _refresh() -> void:
 	running_label.text = "SIMULATION PAUSED" if ship.paused else "CRUISE CONFIGURATION  /  RUNNING"
 	pause_button.text = "Resume [P]" if ship.paused else "Pause [P]"
 	if current_system == "overview":
-		view_description.text = "Live systems and connected machinery. Select a system to explore."
+		view_description.text = "Live systems and connected machinery. Select a system to operate."
 		for id in overview_labels:
 			var summary: Dictionary = presenter.system_summary(id)
 			var labels: Dictionary = overview_labels[id]
@@ -623,18 +712,19 @@ func _refresh() -> void:
 			condition_button.text = str(conditions[0].text) + "   •   Inspect ›"
 	else:
 		var view: Dictionary = ship.definition.view(current_system)
-		view_description.text = str(view.get("description", "Summary readings and connections"))
-		if view.get("kind", "") == "workspace":
-			for id in equipment_labels:
-				equipment_labels[id].text = presenter.caption(id)
-				equipment_labels[id].add_theme_color_override("font_color", _equipment_tone(id))
-			_refresh_inspector()
-		else:
+		view_description.text = str(view.get("description", "Live readings and connections"))
+		for id in equipment_labels:
+			equipment_labels[id].text = presenter.caption(id)
+			equipment_labels[id].add_theme_color_override("font_color", _equipment_tone(id))
+		if is_instance_valid(summary_value):
 			var summary: Dictionary = presenter.system_summary(current_system)
 			summary_value.text = summary.value
 			summary_state.text = summary.state
 			summary_state.add_theme_color_override("font_color", _tone(summary.tone))
-			summary_detail.text = summary.detail
+		_refresh_inspector()
+		if is_instance_valid(quick_controls):
+			quick_controls.refresh()
+		_refresh_couplings()
 	if log_dialog.visible:
 		_refresh_log()
 	if is_instance_valid(maintenance_panel):
@@ -643,7 +733,7 @@ func _refresh() -> void:
 		bypass_panel.refresh()
 
 func _refresh_inspector() -> void:
-	if selected_equipment == "":
+	if selected_equipment.is_empty() or inspector_mode == "bypass":
 		return
 	_refresh_dependency_links()
 	var reason: String = presenter.equipment_reason(selected_equipment)
@@ -655,17 +745,8 @@ func _refresh_inspector() -> void:
 	for i in mini(readings.size(), reading_rows.size()):
 		reading_rows[i].key.text = str(readings[i][0])
 		reading_rows[i].value.text = str(readings[i][1])
-	var settings: Dictionary = ship.components[selected_equipment].settings
-	for widget in control_widgets:
-		var descriptor: Dictionary = widget.descriptor
-		var value = settings.get(descriptor.id, descriptor.get("default", 0))
-		if widget.has("slider"):
-			widget.slider.set_value_no_signal(float(value))
-			widget.slider.editable = not ship.paused
-			widget.value.text = "%.0f %s%s" % [float(value), descriptor.get("unit", ""), "  (paused)" if ship.paused else ""]
-		else:
-			widget.button.text = str(descriptor.label) + ": " + ("ON  •  Switch off" if value else "OFF  •  Switch on")
-			widget.button.disabled = ship.paused
+	if is_instance_valid(inspector_controls):
+		inspector_controls.refresh()
 
 func _tone(name_text: String) -> Color:
 	return AMBER if name_text == "warn" else (GREEN if name_text == "good" else MUTED)
@@ -682,26 +763,20 @@ func _inspect_condition() -> void:
 	if not conditions.is_empty() and not str(conditions[0].system).is_empty():
 		navigate(conditions[0].system, conditions[0].equipment)
 
-func _change_control(value: float, action: String) -> void:
-	ship.command(selected_equipment, action, value)
-
-
-func _toggle_control(action: String) -> void:
-	var settings: Dictionary = ship.components[selected_equipment].settings
-	ship.command(selected_equipment, action, not bool(settings.get(action, false)))
-
 func _pause() -> void:
 	ship.toggle_pause()
 	_refresh()
 
 
 func _reset_ship() -> void:
-	close_maintenance()
-	close_bypass()
+	_release_inspector()
+	bypass_mode = false
+	inspector_mode = "equipment"
+	_bypass_choices.erase(ship.definition.id)
 	ship.reset()
+	_build_view()
 	_refresh()
 	queue_redraw()
-
 
 func _show_log() -> void:
 	_refresh_log()
@@ -719,68 +794,62 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if event.keycode == KEY_P:
 			_pause()
 		elif event.keycode == KEY_ESCAPE:
-			if is_instance_valid(bypass_panel):
+			if inspector_mode == "bypass" or bypass_mode:
 				close_bypass()
-			elif is_instance_valid(maintenance_panel):
+			elif is_instance_valid(maintenance_panel) and maintenance_panel.details_visible():
 				close_maintenance()
 			else:
 				_back()
 
-
 func open_maintenance(id: String) -> void:
-	if not ship.components.has(id) or not ship.definition.component(id).inspectable:
+	if not ship.components.has(id) or not ship.definition.component(id).inspectable or not ship.maintenance_info(id).supported:
 		return
-	close_maintenance()
-	close_bypass()
-	maintenance_panel = MaintenancePanel.new()
-	add_child(maintenance_panel)
-	maintenance_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	maintenance_panel.close_requested.connect(close_maintenance)
-	maintenance_panel.inspect_requested.connect(_inspect_maintenance_supply)
-	maintenance_panel.configure(ship, presenter, id)
-
+	select_equipment(id)
+	if is_instance_valid(maintenance_panel):
+		maintenance_panel.set_details_visible(true)
 
 func close_maintenance() -> void:
 	if is_instance_valid(maintenance_panel):
-		remove_child(maintenance_panel)
-		maintenance_panel.queue_free()
-	maintenance_panel = null
-	if is_instance_valid(maintenance_button) and maintenance_button.is_inside_tree():
-		maintenance_button.grab_focus()
+		maintenance_panel.set_details_visible(false)
 
-
-func _inspect_maintenance_supply(system: String, equipment: String) -> void:
-	close_maintenance()
-	navigate(system, equipment)
-
+func _inspect_maintenance_supply(_system: String, equipment: String) -> void:
+	select_equipment(equipment)
 
 func open_bypass() -> void:
 	if not ship.bypass_info().supported:
 		return
-	close_maintenance()
-	close_bypass()
-	bypass_panel = CoolantBypassPanel.new()
-	add_child(bypass_panel)
-	bypass_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	bypass_panel.close_requested.connect(close_bypass)
-	bypass_panel.inspect_requested.connect(_inspect_bypass_equipment)
-	bypass_panel.configure(ship, presenter, _bypass_choices.get(ship.definition.id, {}))
-
+	if not _is_cooling_view(current_system):
+		for view in ship.definition.views:
+			if _is_cooling_view(view.id):
+				navigate(view.id)
+				break
+	bypass_mode = true
+	inspector_mode = "bypass"
+	_build_view()
+	_refresh()
 
 func close_bypass() -> void:
+	_release_inspector()
+	bypass_mode = false
+	inspector_mode = "equipment"
+	_build_view()
+	_refresh()
+
+
+func _release_inspector() -> void:
 	if is_instance_valid(bypass_panel):
 		_bypass_choices[bypass_panel.ship.definition.id] = bypass_panel.selected_endpoints()
-		remove_child(bypass_panel)
-		bypass_panel.queue_free()
 	bypass_panel = null
-	if is_instance_valid(bypass_button) and bypass_button.is_inside_tree():
-		bypass_button.grab_focus()
+	maintenance_panel = null
 
 
-func _inspect_bypass_equipment(system: String, equipment: String) -> void:
-	close_bypass()
-	navigate(system, equipment)
+func _bypass_selection_changed(source_id: String, circuit_id: String) -> void:
+	_bypass_choices[ship.definition.id] = {"source_id": source_id, "circuit_id": circuit_id}
+	_refresh_couplings()
+	queue_redraw()
 
+func _inspect_bypass_equipment(_system: String, equipment: String) -> void:
+	select_equipment(equipment)
 
 func _line(points: PackedVector2Array, color: Color, energized: bool) -> void:
 	for i in range(points.size() - 1):
@@ -798,7 +867,7 @@ func _draw() -> void:
 	draw_rect(Rect2(0, 0, 1440, 900), INK)
 	if not ship.validation_errors.is_empty():
 		return
-	if ship.definition.view(current_system).get("kind", "") != "workspace":
+	if current_system == "overview":
 		return
 	draw_style_box(_style(Color("0c1a25")), Rect2(244, 350, 732, 520))
 	for x in range(258, 968, 24):
@@ -809,10 +878,37 @@ func _draw() -> void:
 		var points: PackedVector2Array = _route_edge(layout[edge.from_component], layout[edge.to_component], layout)
 		_line(points, GREEN if edge.get("bypass", false) else (AMBER if edge.domain == "thermal" else CYAN), edge.active)
 
+	if bypass_mode and not ship.bypass_info().installed:
+		var choice: Dictionary = _bypass_choices.get(ship.definition.id, {})
+		var source: String = str(choice.get("source_id", ""))
+		for circuit in ship.bypass_info().circuits:
+			if circuit.id == choice.get("circuit_id") and layout.has(source) and layout.has(circuit.service_component):
+				var path: PackedVector2Array = _route_edge(layout[source], layout[circuit.service_component], layout)
+				for i in range(path.size() - 1):
+					draw_dashed_line(path[i], path[i + 1], AMBER, 3, 7, true)
+
+
+func _gui_input(event: InputEvent) -> void:
+	if not event is InputEventMouseButton or not event.pressed or event.button_index != MOUSE_BUTTON_LEFT:
+		return
+	if not _is_cooling_view(current_system) or not ship.bypass_info().installed:
+		return
+	var layout: Dictionary = _workspace_nodes()
+	for edge in presenter.schematic_edges(layout.keys()):
+		if not edge.get("bypass", false):
+			continue
+		var path: PackedVector2Array = _route_edge(layout[edge.from_component], layout[edge.to_component], layout)
+		for i in range(path.size() - 1):
+			if event.position.distance_to(Geometry2D.get_closest_point_to_segment(event.position, path[i], path[i + 1])) <= 8.0:
+				open_bypass()
+				accept_event()
+				return
+
 
 func _route_edge(source: Rect2, destination: Rect2, layout: Dictionary) -> PackedVector2Array:
-	var start: Vector2 = source.get_center()
-	var finish: Vector2 = destination.get_center()
+	# Connect to the machinery readings, not to the middle of expanded controls.
+	var start: Vector2 = Vector2(source.get_center().x, source.position.y + minf(53.0, source.size.y * 0.5))
+	var finish: Vector2 = Vector2(destination.get_center().x, destination.position.y + minf(53.0, destination.size.y * 0.5))
 	var forward: bool = finish.x >= start.x
 	start.x = source.end.x if forward else source.position.x
 	finish.x = destination.position.x if forward else destination.end.x
@@ -823,7 +919,7 @@ func _route_edge(source: Rect2, destination: Rect2, layout: Dictionary) -> Packe
 			continue
 		if _route_intersects(points, rect.grow(8)):
 			var use_top: bool = (source.get_center().y + destination.get_center().y) * 0.5 < 575
-			var lane: float = 356 if use_top else 794
+			var lane: float = 356 if use_top else 862
 			var source_edge: Vector2 = Vector2(source.get_center().x, source.position.y if use_top else source.end.y)
 			var destination_edge: Vector2 = Vector2(destination.get_center().x, destination.position.y if use_top else destination.end.y)
 			return PackedVector2Array([source_edge, Vector2(source_edge.x, lane), Vector2(destination_edge.x, lane), destination_edge])

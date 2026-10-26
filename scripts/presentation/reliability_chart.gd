@@ -20,9 +20,12 @@ func update_profile(profile: Array, info: Dictionary) -> void:
 
 func _draw() -> void:
 	var font: Font = ThemeDB.fallback_font
+	var compact: bool = size.x < 500.0
 	var title: String = "FLOW EFFICIENCY" if mode == "performance" else "FAILURE RATE / 1,000 RUNNING HOURS · LOG SCALE"
+	if compact and mode == "failure":
+		title = "FAILURE RATE / 1,000 h · LOG SCALE"
 	draw_style_box(_box(), Rect2(Vector2.ZERO, size))
-	draw_string(font, Vector2(16, 27), title, HORIZONTAL_ALIGNMENT_LEFT, size.x - 32, 14, TEXT)
+	draw_string(font, Vector2(12 if compact else 16, 27), title, HORIZONTAL_ALIGNMENT_LEFT, size.x - 24, 12 if compact else 14, TEXT)
 	if samples.is_empty():
 		draw_string(font, Vector2(16, 78), "No lifetime model authored for this equipment.", HORIZONTAL_ALIGNMENT_LEFT, size.x - 32, 16, MUTED)
 		return
@@ -69,11 +72,13 @@ func _draw() -> void:
 	draw_dashed_line(Vector2(marker.x, plot.position.y), Vector2(marker.x, plot.end.y), Color(TEXT, 0.5), 1.0, 4.0)
 	draw_circle(marker, 5.0, TEXT)
 	draw_circle(marker, 2.0, Color("101f2c"))
-	var marker_text: String = "Current wear-part age: %s equivalent h" % _hours(float(observation.service_age_hours))
+	var marker_text: String = ("Wear-part age: %s eq h" if compact else "Current wear-part age: %s equivalent h") % _hours(float(observation.service_age_hours))
 	if mode == "failure":
-		marker_text += " · %.3f failures / 1,000 running h" % (float(observation.failure_rate) * 1000.0)
+		marker_text += (" · rate %.3f" if compact else " · %.3f failures / 1,000 running h") % (float(observation.failure_rate) * 1000.0)
 	draw_string(font, Vector2(16, size.y - 29), marker_text, HORIZONTAL_ALIGNMENT_LEFT, size.x - 32, 12, TEXT)
 	var footnote: String = "Bands: normal ≥90% · degraded 60–90% · severe <60%" if mode == "performance" else "A rate estimate, not a guarantee or cumulative failure probability."
+	if compact:
+		footnote = "Normal ≥90% · degraded 60–90% · severe <60%" if mode == "performance" else "Illustrative rate, not cumulative probability."
 	draw_string(font, Vector2(16, size.y - 10), footnote, HORIZONTAL_ALIGNMENT_LEFT, size.x - 32, 12, MUTED)
 
 

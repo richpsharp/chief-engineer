@@ -65,9 +65,10 @@ func _test_navigation() -> void:
 	var before: Dictionary = console.ship.snapshot()
 	var pages_open := true
 	for view in console.ship.definition.views:
-		_press(console.nav_buttons[view.id])
+		console.navigate("overview")
+		_press(console.overview_buttons[view.id])
 		pages_open = pages_open and console.current_system == view.id
-	_check(pages_open and console.overview_buttons.is_empty(), "Every Tern department opens through the shared sidebar.")
+	_check(pages_open and console.overview_buttons.is_empty(), "Every Tern system opens directly from the shared overview.")
 	var inspectors_open := true
 	for spec in console.ship.definition.components:
 		if not spec.inspectable:
@@ -109,8 +110,8 @@ func _test_branch_controls(side: String) -> void:
 		and console.presenter.equipment_status(engine) == "Cooling limited",
 		"The %s engine retains its electrical branch and correctly reports a cooling limitation." % side)
 	_follow_link(pump)
-	_check(console.current_system == "cooling" and console.selected_equipment == pump,
-		"The %s feeder's dependency link opens its coolant pump." % side)
+	_check(console.current_system == "power" and console.selected_equipment == pump,
+		"The %s feeder's dependency link selects its pump while retaining Power." % side)
 	_follow_link(engine)
 	_check(console.selected_equipment == engine and console.inspector_condition.text.begins_with("Cooling limited"),
 		"Following the %s pump reaches the affected engine inspector." % side)
