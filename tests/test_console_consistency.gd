@@ -18,8 +18,8 @@ func _run() -> void:
 	console.set_process(false)
 	await _settle()
 	var workspace_count: int = console.ship.definition.views.filter(func(view): return view.kind == "workspace").size()
-	_check(console.nav_buttons.size() == workspace_count + 1 and not console.nav_buttons.has("reactor"),
-		"Navigation contains the overview and operating workspaces without duplicate status destinations.")
+	_check(console.nav_buttons.size() == workspace_count + 2 and console.nav_buttons.has("connections") and not console.nav_buttons.has("reactor"),
+		"Navigation contains the overview, Connections, and operating workspaces without duplicate status destinations.")
 	var before: Dictionary = console.ship.snapshot()
 	await _click(console.overview_buttons.reactor)
 	_check(console.selected_equipment == "reactor" and is_instance_valid(console.inspector_controls)

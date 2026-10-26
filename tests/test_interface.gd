@@ -283,17 +283,22 @@ func _test_hidden_equipment_with_schematic_position() -> void:
 	_check(not console.equipment_buttons.has("pump_b") and not console.equipment_list_buttons.has("pump_b"),
 		"A hidden pump has neither a schematic card nor an equipment-list entry.")
 	var layout: Dictionary = console._workspace_nodes()
-	var edges: Array = console.presenter.schematic_edges(layout.keys())
+	var edges: Array = console._schematic_edges(layout)
 	_check(edges.all(func(edge): return console.equipment_buttons.has(edge.from_component) and console.equipment_buttons.has(edge.to_component)),
 		"Every drawn connection terminates at displayed equipment, with no dangling hidden-pump endpoint.")
 	_check(not layout.has("pump_b"), "The drawing layout excludes the hidden pump as both an endpoint and a routing obstacle.")
 	pump_rect = layout["pump_a"]
 	exchanger_rect = layout["heat_exchanger"]
 	var visible_route: PackedVector2Array = console._route_edge(pump_rect, exchanger_rect, layout)
-	var straight_route := true
-	for point in visible_route:
-		straight_route = straight_route and _near(point.y, pump_rect.get_center().y)
-	_check(straight_route, "A retained hidden rectangle cannot force a detour in a visible connection.")
+	# Other visible context nodes can legitimately require a bend. Compare the
+	# same physical ship with only its hidden placement removed, not an assumed
+	# straight route that depends on the surrounding presentation layout.
+	definition.layouts["cooling"].nodes.erase("pump_b")
+	var without_hidden: Dictionary = console._workspace_nodes()
+	var unretained_route: PackedVector2Array = console._route_edge(without_hidden["pump_a"], without_hidden["heat_exchanger"], without_hidden)
+	definition.layouts["cooling"].nodes["pump_b"] = authored_nodes["pump_b"]
+	_check(visible_route.size() >= 2 and visible_route == unretained_route,
+		"A retained hidden rectangle cannot change the visible route compared with the same ship without that placement.")
 	_check(edges.any(func(edge): return edge.from_component == "pump_a" and edge.to_component == "heat_exchanger" and edge.domain == "coolant" and edge.active),
 		"Connections between the remaining visible equipment still appear active.")
 	_check(edges.any(func(edge): return edge.from_component == "heat_exchanger" and edge.to_component == "radiator" and edge.domain == "thermal" and edge.active),
